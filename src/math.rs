@@ -105,11 +105,6 @@ impl BoundingBox {
         self.max = self.max.max(pos);
     }
 
-    pub fn combine(&mut self, other: Self) {
-        self.min = self.min.min(other.min);
-        self.max = self.max.max(other.max);
-    }
-
     pub fn size(&self) -> Vec3 {
         self.max - self.min
     }

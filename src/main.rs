@@ -49,9 +49,8 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
         OutputType::from_file(&args.output).context("failed to infer output file type")?;
 
     let mesh = match input_type {
-        InputType::GlbGltf => {
-            gltf2::load_gltf(&args.input).context("failed to load the input file")?
-        }
+        InputType::GlbGltf => gltf2::load_gltf(&args.input, args.base_scale)
+            .context("failed to load the input file")?,
     };
 
     println!("Mesh is loaded");
@@ -93,6 +92,10 @@ struct Args {
     /// The resolution of the output model
     #[arg(long, default_value_t = 1024)]
     res: u32,
+
+    /// The resolution of the output model
+    #[arg(long, default_value_t = 1.0)]
+    base_scale: f32,
 }
 
 fn main() -> Result<()> {

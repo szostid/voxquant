@@ -5,7 +5,32 @@ use image::Rgb;
 use image::Rgba;
 use image::buffer::ConvertBuffer;
 use rayon::prelude::*;
-use std::sync::Mutex;
+
+struct MeshInstance<'a> {
+    mesh: gltf::Mesh<'a>,
+    transform: Mat4,
+}
+
+fn collect_instances<'a>(
+    node: gltf::Node<'a>,
+    parent_transform: Mat4,
+    instances: &mut Vec<MeshInstance<'a>>,
+) {
+    let local_matrix = Mat4::from_cols_array_2d(&node.transform().matrix());
+
+    let global_transform = parent_transform * local_matrix;
+
+    if let Some(mesh) = node.mesh() {
+        instances.push(MeshInstance {
+            mesh,
+            transform: global_transform,
+        });
+    }
+
+    for child in node.children() {
+        collect_instances(child, global_transform, instances);
+    }
+}
 
 #[profiling::function]
 fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
@@ -121,6 +146,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[gltf::image::Data]) -> Res
 #[profiling::function]
 fn parse_mesh(
     mesh: &gltf::Mesh,
+    transform: Mat4,
     bounds: &mut BoundingBox,
     materials: &[ImageOrColor],
     buffers: &[gltf::buffer::Data],
@@ -141,10 +167,6 @@ fn parse_mesh(
             bail!("a mesh in the file uses non-triangle geometry");
         }
 
-        let bound = primitive.bounding_box();
-        bounds.extend(bound.min.into());
-        bounds.extend(bound.max.into());
-
         let material_idx = primitive.material().index().unwrap_or(materials.len());
 
         let data = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -157,8 +179,12 @@ fn parse_mesh(
         let vert_coords = data
             .read_positions()
             .context("a mesh in the file has no vertex positions")?
-            .map(Vec3::from)
+            .map(|v| transform.transform_point3(Vec3::from(v)))
             .collect::<Vec<_>>();
+
+        for &v in &vert_coords {
+            bounds.extend(v);
+        }
 
         let uvs = data
             .read_tex_coords(0)
@@ -196,7 +222,7 @@ fn parse_mesh(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &str) -> Result<Mesh> {
+pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
     let (document, buffers, images) = {
         profiling::scope!("gltf::import");
         gltf::import(path).context("failed to load the gltf file")
@@ -213,6 +239,13 @@ pub fn load_gltf(path: &str) -> Result<Mesh> {
     // i.e. default material
     materials.push(ImageOrColor::Color(image::Rgba([255, 255, 255, 255])));
 
+    let mut instances = Vec::new();
+    for scene in document.scenes() {
+        for node in scene.nodes() {
+            collect_instances(node, Mat4::from_scale(Vec3::splat(scale)), &mut instances);
+        }
+    }
+
     let total_triangles: usize = document
         .meshes()
         .flat_map(|m| m.primitives())
@@ -224,38 +257,28 @@ pub fn load_gltf(path: &str) -> Result<Mesh> {
         })
         .sum();
 
-    let all_triangles = Mutex::new(Vec::with_capacity(total_triangles));
-    let all_extras = Mutex::new(Vec::with_capacity(total_triangles));
-    let all_bounds = Mutex::new(BoundingBox::zero());
+    let mut triangles = Vec::with_capacity(total_triangles);
+    let mut triangle_extras = Vec::with_capacity(total_triangles);
+    let mut bounds = BoundingBox::zero();
 
-    document
-        .meshes()
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        // at least 32 meshes per job to reduce overhead
-        .with_min_len(32)
-        .fold(
-            || (Vec::new(), Vec::new(), BoundingBox::zero()),
-            |mut acc, mesh| {
-                let (tris, extras, bounds) = &mut acc;
-
-                if let Err(e) = parse_mesh(&mesh, bounds, &materials, &buffers, tris, extras) {
-                    eprintln!("Failed to parse mesh: {:?}", e);
-                }
-
-                acc
-            },
-        )
-        .for_each(|(triangles, extras, bounds)| {
-            all_bounds.lock().unwrap().combine(bounds);
-            all_extras.lock().unwrap().extend(extras);
-            all_triangles.lock().unwrap().extend(triangles);
-        });
+    for instance in instances {
+        if let Err(e) = parse_mesh(
+            &instance.mesh,
+            instance.transform,
+            &mut bounds,
+            &materials,
+            &buffers,
+            &mut triangles,
+            &mut triangle_extras,
+        ) {
+            eprintln!("failed to parse mesh: {e}")
+        };
+    }
 
     Ok(Mesh {
         materials,
-        triangles: all_triangles.into_inner().unwrap(),
-        triangle_extras: all_extras.into_inner().unwrap(),
-        bounds: all_bounds.into_inner().unwrap(),
+        triangles,
+        triangle_extras,
+        bounds,
     })
 }

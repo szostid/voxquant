@@ -44,6 +44,7 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) 
 fn voxelize_triangle(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) {
     const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
 
+    // find the longest side and the indices of the two vectors it connects
     let (a, b, ab) = LINES
         .map(|(a, b)| (a, b, tri_pos[a].distance_squared(tri_pos[b])))
         .into_iter()
