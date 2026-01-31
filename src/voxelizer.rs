@@ -34,13 +34,13 @@ impl Chunk {
     }
 }
 
-fn voxelize_wireframe(store: &mut Chunk, shading: &TriangleData, tri_pos: [Vec3; 3]) {
+fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, tri_pos: [Vec3; 3]) {
     voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
     voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
     voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
 }
 
-fn voxelize_triangle(store: &mut Chunk, shading: &TriangleData, tri_pos: [Vec3; 3]) {
+fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri_pos: [Vec3; 3]) {
     const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
 
     // find the longest side and the indices of the two vectors it connects
@@ -66,7 +66,7 @@ fn voxelize_triangle(store: &mut Chunk, shading: &TriangleData, tri_pos: [Vec3; 
 }
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
-fn voxelize_line(store: &mut Chunk, shading: &TriangleData, p1: Vec3, p2: Vec3) {
+fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -125,17 +125,15 @@ enum AlbedoData<'a> {
     Flat(Color),
 }
 
-struct TriangleData<'a> {
-    vertices: [Vec3; 3],
+struct ColorData<'a> {
+    precalc: TriangleData,
     vert_colors: [Color; 3],
-    normal: Vec3,
     albedo: AlbedoData<'a>,
 }
 
-impl TriangleData<'_> {
+impl ColorData<'_> {
     pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
-        let point = closest_point_triangle(map_pos.as_vec3(), self.vertices);
-        let bary = get_barycentric_coordinates(point, self.vertices, self.normal);
+        let bary = self.precalc.get_closest_barycentric(map_pos.as_vec3());
 
         let v_color = interpolate_color(self.vert_colors, bary);
 
@@ -209,10 +207,9 @@ fn voxelize_chunk(
             ImageOrColor::Color(color) => AlbedoData::Flat(*color),
         };
 
-        let shading = TriangleData {
-            vertices,
+        let shading = ColorData {
+            precalc: TriangleData::new(vertices),
             vert_colors,
-            normal: get_normal(vertices),
             albedo,
         };
 
