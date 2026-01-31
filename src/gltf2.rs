@@ -144,20 +144,10 @@ fn parse_mesh(
     extras: &mut Vec<[VertexExtras; 3]>,
 ) -> Result<()> {
     #[inline]
-    fn get_extras(
-        idx: usize,
-        normals: Option<&[Vec3]>,
-        uvs: Option<&[Vec2]>,
-        material_idx: u32,
-    ) -> VertexExtras {
-        let normal = normals
-            .as_ref()
-            .and_then(|normals| normals.get(idx))
-            .copied();
-
+    fn get_extras(idx: usize, uvs: Option<&[Vec2]>, material_idx: u32) -> VertexExtras {
         let uv = uvs.as_ref().and_then(|uvs| uvs.get(idx)).copied();
 
-        VertexExtras::new(normal, uv, material_idx)
+        VertexExtras::new(uv, material_idx)
     }
 
     for primitive in mesh.primitives() {
@@ -186,10 +176,6 @@ fn parse_mesh(
             .map(Vec3::from)
             .collect::<Vec<_>>();
 
-        let normals = data
-            .read_normals()
-            .map(|normals| normals.map(Vec3::from).collect::<Vec<_>>());
-
         let uvs = data
             .read_tex_coords(0)
             .map(|uvs| uvs.into_f32().map(Vec2::from).collect::<Vec<_>>());
@@ -215,24 +201,9 @@ fn parse_mesh(
             ]);
 
             extras.push([
-                get_extras(
-                    i1 as usize,
-                    normals.as_deref(),
-                    uvs.as_deref(),
-                    material_idx as u32,
-                ),
-                get_extras(
-                    i2 as usize,
-                    normals.as_deref(),
-                    uvs.as_deref(),
-                    material_idx as u32,
-                ),
-                get_extras(
-                    i3 as usize,
-                    normals.as_deref(),
-                    uvs.as_deref(),
-                    material_idx as u32,
-                ),
+                get_extras(i1 as usize, uvs.as_deref(), material_idx as u32),
+                get_extras(i2 as usize, uvs.as_deref(), material_idx as u32),
+                get_extras(i3 as usize, uvs.as_deref(), material_idx as u32),
             ]);
         }
     }
@@ -251,28 +222,6 @@ pub fn load_gltf(path: &str) -> Result<Mesh> {
         .parent()
         .and_then(|file| file.as_os_str().to_str())
         .context("failed to read the parent folder of the file")?;
-
-    let main_camera = document
-        .cameras()
-        .find(|cam| cam.index() != 0)
-        .map(|camera| Camera::new(&camera.projection()));
-
-    let model_view_projection = Mat4::from_cols_array_2d(
-        &document
-            .scenes()
-            .next()
-            .context("file has no scenes")?
-            .nodes()
-            .next()
-            .context("scene has no root nodes")?
-            .transform()
-            .matrix(),
-    );
-
-    let view = View {
-        camera: main_camera,
-        model_view_projection,
-    };
 
     let mut triangles = Vec::new();
     let mut triangle_extras = Vec::new();
@@ -306,6 +255,5 @@ pub fn load_gltf(path: &str) -> Result<Mesh> {
         triangles,
         triangle_extras,
         bounds,
-        view,
     })
 }

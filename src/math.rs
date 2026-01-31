@@ -4,6 +4,7 @@ pub use glam::*;
 /// that is the closest to the point `p`.
 ///
 /// https://github.com/embree/embree/blob/master/tutorials/common/math/closest_point.h
+#[must_use]
 pub fn closest_point_triangle(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
     let [a, b, c] = tri;
 
@@ -56,6 +57,7 @@ pub fn closest_point_triangle(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
 }
 
 /// Returns the normal vector of the triangle `a, b, c`
+#[must_use]
 pub fn get_normal(tri: [Vec3; 3]) -> Vec3 {
     let [a, b, c] = tri;
 
@@ -65,6 +67,7 @@ pub fn get_normal(tri: [Vec3; 3]) -> Vec3 {
 /// Given a triangle `a, b, c`, and a point `p`, returns the barycentric coordinates of the point `p`.
 ///
 /// https://gamedev.stackexchange.com/questions/23743/whats-the-most-efficient-way-to-find-barycentric-coordinates
+#[must_use]
 pub fn get_barycentric_coordinates(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
     let [a, b, c] = tri;
 
@@ -100,16 +103,6 @@ impl BoundingBox {
     pub fn extend(&mut self, pos: Vec3) {
         self.min = self.min.min(pos);
         self.max = self.max.max(pos);
-    }
-
-    pub fn from_points(points: impl IntoIterator<Item = Vec3>) -> Self {
-        let mut this = Self::max();
-
-        for point in points {
-            this.extend(point);
-        }
-
-        this
     }
 
     pub fn size(&self) -> Vec3 {

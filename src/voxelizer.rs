@@ -79,6 +79,11 @@ fn voxelize_line(store: &mut Octree, shading: &Shading, p1: Vec3, p2: Vec3) {
     }
 }
 
+fn voxelize_point(store: &mut Octree, point: Vec3) {
+    let point = point.round().as_ivec3();
+    store.store(point, image::Rgba([32, 32, 32, 255]));
+}
+
 #[derive(Debug)]
 struct TexturedShading<'a> {
     pub image: &'a image::RgbaImage,
@@ -124,11 +129,6 @@ pub enum VoxelizationMode {
     Triangles,
     Lines,
     Points,
-}
-
-pub fn voxelize_point(store: &mut Octree, point: Vec3) {
-    let point = point.round().as_ivec3();
-    store.store(point, image::Rgba([32, 32, 32, 255]));
 }
 
 #[profiling::function]

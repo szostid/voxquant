@@ -32,25 +32,17 @@ impl From<Vertex> for FloatVertex {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub struct VertexExtras {
-    normal: Vec3,
     uv: Vec2,
 
     pub material_idx: u32,
 }
 
 impl VertexExtras {
-    pub fn new(normal: Option<Vec3>, uv: Option<Vec2>, material_idx: u32) -> Self {
+    pub fn new(uv: Option<Vec2>, material_idx: u32) -> Self {
         Self {
-            normal: normal.unwrap_or(Vec3::NAN),
             uv: uv.unwrap_or(Vec2::NAN),
             material_idx,
         }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn normal(&self) -> Option<Vec3> {
-        (self.normal != Vec3::NAN).then_some(self.normal)
     }
 
     #[inline]
@@ -73,71 +65,6 @@ pub struct Mesh {
     pub materials: Vec<ImageOrColor>,
 
     pub bounds: BoundingBox,
-    pub view: View,
-}
-
-#[derive(Debug, Clone)]
-pub struct PerspectiveCamera {
-    pub yfov: f32,
-    pub znear: f32,
-
-    pub zfar: Option<f32>,
-    pub aspect_ratio: Option<f32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct OrthographicCamera {
-    pub xmag: f32,
-    pub ymag: f32,
-    pub zfar: f32,
-    pub znear: f32,
-}
-
-impl PerspectiveCamera {
-    pub fn new(value: &gltf::camera::Perspective<'_>) -> Self {
-        Self {
-            yfov: value.yfov(),
-            znear: value.znear(),
-            zfar: value.zfar(),
-            aspect_ratio: value.aspect_ratio(),
-        }
-    }
-}
-
-impl OrthographicCamera {
-    pub fn new(value: &gltf::camera::Orthographic<'_>) -> Self {
-        Self {
-            xmag: value.xmag(),
-            ymag: value.ymag(),
-            zfar: value.zfar(),
-            znear: value.znear(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Camera {
-    PerspectiveCamera(PerspectiveCamera),
-    OrthographiCamera(OrthographicCamera),
-}
-
-impl Camera {
-    pub fn new(cam: &gltf::camera::Projection<'_>) -> Self {
-        match cam {
-            gltf::camera::Projection::Orthographic(ort) => {
-                Camera::OrthographiCamera(OrthographicCamera::new(ort))
-            }
-            gltf::camera::Projection::Perspective(per) => {
-                Camera::PerspectiveCamera(PerspectiveCamera::new(per))
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct View {
-    pub camera: Option<Camera>,
-    pub model_view_projection: Mat4,
 }
 
 mod magica {

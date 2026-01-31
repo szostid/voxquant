@@ -1,11 +1,11 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::pedantic)]
-pub mod gltf2;
-pub mod io;
-pub mod math;
-pub mod octree;
-pub mod space_filling;
-pub mod voxelizer;
+
+mod gltf2;
+mod io;
+mod math;
+mod octree;
+mod voxelizer;
 
 use crate::voxelizer::{VoxelizationMode, voxelize};
 use clap::Parser;
