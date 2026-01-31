@@ -146,10 +146,15 @@ fn parse_mesh(
     extras: &mut Vec<[VertexExtras; 3]>,
 ) -> Result<()> {
     #[inline]
-    fn get_extras(idx: usize, uvs: Option<&[Vec2]>, material_idx: u32) -> VertexExtras {
+    fn get_extras(
+        idx: usize,
+        uvs: Option<&[Vec2]>,
+        colors: Option<&[[u8; 4]]>,
+        material_idx: u32,
+    ) -> VertexExtras {
         let uv = uvs.as_ref().and_then(|uvs| uvs.get(idx)).copied();
-
-        VertexExtras::new(uv, material_idx)
+        let color = colors.as_ref().and_then(|colors| colors.get(idx)).copied();
+        VertexExtras::new(uv, color, material_idx)
     }
 
     for primitive in mesh.primitives() {
@@ -178,6 +183,10 @@ fn parse_mesh(
             bounds.extend(v);
         }
 
+        let colors = data
+            .read_colors(0)
+            .map(|c| c.into_rgba_u8().collect::<Vec<_>>());
+
         let uvs = data
             .read_tex_coords(0)
             .map(|uvs| uvs.into_f32().map(Vec2::from).collect::<Vec<_>>());
@@ -203,9 +212,24 @@ fn parse_mesh(
             ]);
 
             extras.push([
-                get_extras(i1 as usize, uvs.as_deref(), material_idx as u32),
-                get_extras(i2 as usize, uvs.as_deref(), material_idx as u32),
-                get_extras(i3 as usize, uvs.as_deref(), material_idx as u32),
+                get_extras(
+                    i1 as usize,
+                    uvs.as_deref(),
+                    colors.as_deref(),
+                    material_idx as u32,
+                ),
+                get_extras(
+                    i2 as usize,
+                    uvs.as_deref(),
+                    colors.as_deref(),
+                    material_idx as u32,
+                ),
+                get_extras(
+                    i3 as usize,
+                    uvs.as_deref(),
+                    colors.as_deref(),
+                    material_idx as u32,
+                ),
             ]);
         }
     }

@@ -1,9 +1,11 @@
+use crate::*;
 pub use glam::*;
 
 /// Given a triangle `a, b, c`, and a point `p`, returns the point on the triangle
 /// that is the closest to the point `p`.
 ///
 /// https://github.com/embree/embree/blob/master/tutorials/common/math/closest_point.h
+#[inline]
 #[must_use]
 pub fn closest_point_triangle(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
     let [a, b, c] = tri;
@@ -57,6 +59,7 @@ pub fn closest_point_triangle(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
 }
 
 /// Returns the normal vector of the triangle `a, b, c`
+#[inline]
 #[must_use]
 pub fn get_normal(tri: [Vec3; 3]) -> Vec3 {
     let [a, b, c] = tri;
@@ -67,6 +70,7 @@ pub fn get_normal(tri: [Vec3; 3]) -> Vec3 {
 /// Given a triangle `a, b, c`, and a point `p`, returns the barycentric coordinates of the point `p`.
 ///
 /// https://gamedev.stackexchange.com/questions/23743/whats-the-most-efficient-way-to-find-barycentric-coordinates
+#[inline]
 #[must_use]
 pub fn get_barycentric_coordinates(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
     let [a, b, c] = tri;
@@ -108,4 +112,32 @@ impl BoundingBox {
     pub fn size(&self) -> Vec3 {
         self.max - self.min
     }
+}
+
+#[inline]
+#[must_use]
+pub fn interpolate_color(colors: [Color; 3], bary: Vec3) -> Color {
+    let c0 = Vec4::from_array(colors[0].0.map(|c| c as f32));
+    let c1 = Vec4::from_array(colors[1].0.map(|c| c as f32));
+    let c2 = Vec4::from_array(colors[2].0.map(|c| c as f32));
+
+    let final_color = c0 * bary.x + c1 * bary.y + c2 * bary.z;
+
+    image::Rgba([
+        final_color.x as u8,
+        final_color.y as u8,
+        final_color.z as u8,
+        final_color.w as u8,
+    ])
+}
+
+#[inline]
+#[must_use]
+pub fn multiply_colors(c1: Color, c2: Color) -> Color {
+    image::Rgba([
+        ((c1[0] as u16 * c2[0] as u16) / 255) as u8,
+        ((c1[1] as u16 * c2[1] as u16) / 255) as u8,
+        ((c1[2] as u16 * c2[2] as u16) / 255) as u8,
+        ((c1[3] as u16 * c2[3] as u16) / 255) as u8,
+    ])
 }

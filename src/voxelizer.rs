@@ -1,7 +1,6 @@
 use crate::io::{ImageOrColor, Mesh};
-use crate::math::{closest_point_triangle, get_barycentric_coordinates};
+use crate::*;
 use dot_vox::Voxel;
-use glam::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -18,7 +17,7 @@ impl Chunk {
         }
     }
 
-    pub fn add_voxel(&mut self, position: IVec3, value: image::Rgba<u8>) {
+    pub fn add_voxel(&mut self, position: IVec3, value: Color) {
         let pos_in_chunk = position - self.origin;
 
         let Ok(pos_in_chunk) = U8Vec3::try_from(pos_in_chunk) else {
@@ -35,13 +34,13 @@ impl Chunk {
     }
 }
 
-fn voxelize_wireframe(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) {
+fn voxelize_wireframe(store: &mut Chunk, shading: &Coloring, tri_pos: [Vec3; 3]) {
     voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
     voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
     voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
 }
 
-fn voxelize_triangle(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) {
+fn voxelize_triangle(store: &mut Chunk, shading: &Coloring, tri_pos: [Vec3; 3]) {
     const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
 
     // find the longest side and the indices of the two vectors it connects
@@ -67,7 +66,7 @@ fn voxelize_triangle(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) {
 }
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
-fn voxelize_line(store: &mut Chunk, shading: &Shading, p1: Vec3, p2: Vec3) {
+fn voxelize_line(store: &mut Chunk, shading: &Coloring, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -117,43 +116,57 @@ fn voxelize_point(store: &mut Chunk, point: Vec3) {
     store.add_voxel(point, image::Rgba([32, 32, 32, 255]));
 }
 
-#[derive(Debug)]
-struct TexturedShading<'a> {
-    pub image: &'a image::RgbaImage,
-    pub vertices: [Vec3; 3],
-    pub uvs: [Vec2; 3],
+enum Coloring<'a> {
+    Texture {
+        image: &'a image::RgbaImage,
+        vertices: [Vec3; 3],
+        uvs: [Vec2; 3],
+        vert_colors: [Color; 3],
+    },
+    Flat {
+        base_color: Color,
+        vertices: [Vec3; 3],
+        vert_colors: [Color; 3],
+    },
 }
 
-#[derive(Debug)]
-enum Shading<'a> {
-    Texture(TexturedShading<'a>),
-    Color(image::Rgba<u8>),
-}
-
-impl Shading<'_> {
+impl Coloring<'_> {
     pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
-        match self {
-            Shading::Texture(texture) => {
-                let point = closest_point_triangle(map_pos.as_vec3(), texture.vertices);
-
-                let barycentric = get_barycentric_coordinates(point, texture.vertices);
-
-                let mut texture_cords = (texture.uvs[0] * barycentric.x)
-                    + (texture.uvs[1] * barycentric.y)
-                    + (texture.uvs[2] * barycentric.z);
-
-                texture_cords.x = texture_cords.x.rem_euclid(1.0);
-                texture_cords.y = texture_cords.y.rem_euclid(1.0);
-
-                let (x, y) = texture.image.dimensions();
-                let x = (((x - 1) as f32) * texture_cords.x) as u32;
-                let y = (((y - 1) as f32) * texture_cords.y) as u32;
-
-                *texture.image.get_pixel(x, y)
+        let (vertices, vert_colors) = match self {
+            Coloring::Texture {
+                vertices,
+                vert_colors,
+                ..
             }
+            | Coloring::Flat {
+                vertices,
+                vert_colors,
+                ..
+            } => (*vertices, *vert_colors),
+        };
 
-            Shading::Color(color) => *color,
-        }
+        let point = closest_point_triangle(map_pos.as_vec3(), vertices);
+        let bary = get_barycentric_coordinates(point, vertices);
+
+        let v_color = interpolate_color(vert_colors, bary);
+
+        let base_color = match self {
+            Coloring::Texture { image, uvs, .. } => {
+                let mut uv = (uvs[0] * bary.x) + (uvs[1] * bary.y) + (uvs[2] * bary.z);
+
+                uv.x = uv.x.rem_euclid(1.0);
+                uv.y = uv.y.rem_euclid(1.0);
+
+                let (w, h) = image.dimensions();
+                let x = (((w - 1) as f32) * uv.x) as u32;
+                let y = (((h - 1) as f32) * uv.y) as u32;
+
+                *image.get_pixel(x, y)
+            }
+            Coloring::Flat { base_color, .. } => *base_color,
+        };
+
+        multiply_colors(base_color, v_color)
     }
 }
 
@@ -186,25 +199,34 @@ fn voxelize_chunk(
             .map(|vertex| vertex - mesh.bounds.min)
             .map(|vertex| vertex * scale);
 
-        let mat_id = mesh.triangle_extras[tri][0].material_idx;
+        let extras = mesh.triangle_extras[tri];
+
+        // material_idx should be uniform across extras so this shouldnt matter
+        let mat_id = extras[0].material_idx;
+
         let material = mesh
             .materials
             .get(mat_id as usize)
             .unwrap_or(&mesh.materials[0]);
 
+        let vert_colors = extras.map(|extra| image::Rgba(extra.color));
+
         let shading = match material {
             ImageOrColor::Image(image) => {
-                let uvs = mesh.triangle_extras[tri].map(|extras| extras.uv().unwrap());
+                let uvs = extras.map(|extras| extras.uv().unwrap());
 
-                let texture = TexturedShading {
+                Coloring::Texture {
                     image,
                     vertices,
                     uvs,
-                };
-
-                Shading::Texture(texture)
+                    vert_colors,
+                }
             }
-            ImageOrColor::Color(color) => Shading::Color(*color),
+            ImageOrColor::Color(color) => Coloring::Flat {
+                base_color: *color,
+                vertices,
+                vert_colors,
+            },
         };
 
         match mode {

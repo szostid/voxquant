@@ -30,13 +30,15 @@ impl From<Vertex> for FloatVertex {
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub struct VertexExtras {
     uv: Vec2,
+    pub color: [u8; 4],
     pub material_idx: u32,
 }
 
 impl VertexExtras {
-    pub fn new(uv: Option<Vec2>, material_idx: u32) -> Self {
+    pub fn new(uv: Option<Vec2>, color: Option<[u8; 4]>, material_idx: u32) -> Self {
         Self {
             uv: uv.unwrap_or(Vec2::NAN),
+            color: color.unwrap_or([255, 255, 255, 255]),
             material_idx,
         }
     }
@@ -51,7 +53,7 @@ impl VertexExtras {
 #[derive(Debug, Clone)]
 pub enum ImageOrColor {
     Image(image::RgbaImage),
-    Color(image::Rgba<u8>),
+    Color(Color),
 }
 
 #[derive(Debug, Clone)]

@@ -12,6 +12,8 @@ use voxelizer::{VoxelizationMode, voxelize};
 use anyhow::{Context as _, Result, bail};
 use math::*;
 
+type Color = image::Rgba<u8>;
+
 enum InputType {
     GlbGltf,
 }
