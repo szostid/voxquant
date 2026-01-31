@@ -6,6 +6,8 @@ mod io;
 mod math;
 mod voxelizer;
 
+use std::time::Instant;
+
 use clap::Parser;
 use voxelizer::{VoxelizationMode, voxelize};
 
@@ -50,16 +52,22 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
     let output_type =
         OutputType::from_file(&args.output).context("failed to infer output file type")?;
 
+    let t0 = Instant::now();
+
     let mesh = match input_type {
         InputType::GlbGltf => gltf2::load_gltf(&args.input, args.base_scale)
             .context("failed to load the input file")?,
     };
 
-    println!("Mesh is loaded");
+    let t1 = Instant::now();
+
+    println!("Mesh loaded in {}s", (t1 - t0).as_secs_f32());
 
     let data = voxelize(&mesh, args.res, VoxelizationMode::Triangles);
 
-    println!("Mesh is voxelized");
+    let t2 = Instant::now();
+
+    println!("Mesh voxelized in {}s", (t2 - t1).as_secs_f32());
 
     match output_type {
         OutputType::MagicaVoxel => {
@@ -67,7 +75,9 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
         }
     }
 
-    println!("Mesh is saved");
+    let t3 = Instant::now();
+
+    println!("Mesh saved in {}s", (t3 - t2).as_secs_f32());
 
     Ok(())
 }

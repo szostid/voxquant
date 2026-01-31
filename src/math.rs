@@ -72,10 +72,8 @@ pub fn get_normal(tri: [Vec3; 3]) -> Vec3 {
 /// https://gamedev.stackexchange.com/questions/23743/whats-the-most-efficient-way-to-find-barycentric-coordinates
 #[inline]
 #[must_use]
-pub fn get_barycentric_coordinates(p: Vec3, tri: [Vec3; 3]) -> Vec3 {
+pub fn get_barycentric_coordinates(p: Vec3, tri: [Vec3; 3], normal: Vec3) -> Vec3 {
     let [a, b, c] = tri;
-
-    let normal = get_normal(tri);
 
     let area_abc = normal.dot((b - a).cross(c - a));
     let area_pbc = normal.dot((b - p).cross(c - p));

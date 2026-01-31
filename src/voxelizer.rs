@@ -34,13 +34,13 @@ impl Chunk {
     }
 }
 
-fn voxelize_wireframe(store: &mut Chunk, shading: &Coloring, tri_pos: [Vec3; 3]) {
+fn voxelize_wireframe(store: &mut Chunk, shading: &TriangleData, tri_pos: [Vec3; 3]) {
     voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
     voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
     voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
 }
 
-fn voxelize_triangle(store: &mut Chunk, shading: &Coloring, tri_pos: [Vec3; 3]) {
+fn voxelize_triangle(store: &mut Chunk, shading: &TriangleData, tri_pos: [Vec3; 3]) {
     const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
 
     // find the longest side and the indices of the two vectors it connects
@@ -66,7 +66,7 @@ fn voxelize_triangle(store: &mut Chunk, shading: &Coloring, tri_pos: [Vec3; 3]) 
 }
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
-fn voxelize_line(store: &mut Chunk, shading: &Coloring, p1: Vec3, p2: Vec3) {
+fn voxelize_line(store: &mut Chunk, shading: &TriangleData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -116,42 +116,31 @@ fn voxelize_point(store: &mut Chunk, point: Vec3) {
     store.add_voxel(point, image::Rgba([32, 32, 32, 255]));
 }
 
-enum Coloring<'a> {
+#[derive(Clone, Copy)]
+enum AlbedoData<'a> {
     Texture {
         image: &'a image::RgbaImage,
-        vertices: [Vec3; 3],
         uvs: [Vec2; 3],
-        vert_colors: [Color; 3],
     },
-    Flat {
-        base_color: Color,
-        vertices: [Vec3; 3],
-        vert_colors: [Color; 3],
-    },
+    Flat(Color),
 }
 
-impl Coloring<'_> {
+struct TriangleData<'a> {
+    vertices: [Vec3; 3],
+    vert_colors: [Color; 3],
+    normal: Vec3,
+    albedo: AlbedoData<'a>,
+}
+
+impl TriangleData<'_> {
     pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
-        let (vertices, vert_colors) = match self {
-            Coloring::Texture {
-                vertices,
-                vert_colors,
-                ..
-            }
-            | Coloring::Flat {
-                vertices,
-                vert_colors,
-                ..
-            } => (*vertices, *vert_colors),
-        };
+        let point = closest_point_triangle(map_pos.as_vec3(), self.vertices);
+        let bary = get_barycentric_coordinates(point, self.vertices, self.normal);
 
-        let point = closest_point_triangle(map_pos.as_vec3(), vertices);
-        let bary = get_barycentric_coordinates(point, vertices);
+        let v_color = interpolate_color(self.vert_colors, bary);
 
-        let v_color = interpolate_color(vert_colors, bary);
-
-        let base_color = match self {
-            Coloring::Texture { image, uvs, .. } => {
+        let base_color = match self.albedo {
+            AlbedoData::Texture { image, uvs, .. } => {
                 let mut uv = (uvs[0] * bary.x) + (uvs[1] * bary.y) + (uvs[2] * bary.z);
 
                 uv.x = uv.x.rem_euclid(1.0);
@@ -163,7 +152,7 @@ impl Coloring<'_> {
 
                 *image.get_pixel(x, y)
             }
-            Coloring::Flat { base_color, .. } => *base_color,
+            AlbedoData::Flat(base_color) => base_color,
         };
 
         multiply_colors(base_color, v_color)
@@ -211,22 +200,20 @@ fn voxelize_chunk(
 
         let vert_colors = extras.map(|extra| image::Rgba(extra.color));
 
-        let shading = match material {
+        let albedo = match material {
             ImageOrColor::Image(image) => {
                 let uvs = extras.map(|extras| extras.uv().unwrap());
 
-                Coloring::Texture {
-                    image,
-                    vertices,
-                    uvs,
-                    vert_colors,
-                }
+                AlbedoData::Texture { image, uvs }
             }
-            ImageOrColor::Color(color) => Coloring::Flat {
-                base_color: *color,
-                vertices,
-                vert_colors,
-            },
+            ImageOrColor::Color(color) => AlbedoData::Flat(*color),
+        };
+
+        let shading = TriangleData {
+            vertices,
+            vert_colors,
+            normal: get_normal(vertices),
+            albedo,
         };
 
         match mode {
