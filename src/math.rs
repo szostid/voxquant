@@ -93,7 +93,7 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    pub const fn max() -> Self {
+    pub const fn zero() -> Self {
         Self {
             min: Vec3::MAX,
             max: Vec3::MIN,
@@ -103,6 +103,11 @@ impl BoundingBox {
     pub fn extend(&mut self, pos: Vec3) {
         self.min = self.min.min(pos);
         self.max = self.max.max(pos);
+    }
+
+    pub fn combine(&mut self, other: Self) {
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
     }
 
     pub fn size(&self) -> Vec3 {

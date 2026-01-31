@@ -30,7 +30,6 @@ impl From<Vertex> for FloatVertex {
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub struct VertexExtras {
     uv: Vec2,
-
     pub material_idx: u32,
 }
 
@@ -109,6 +108,7 @@ pub mod magica {
     }
 }
 
+#[profiling::function]
 pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> Result<()> {
     use dot_vox::*;
 
@@ -164,7 +164,7 @@ pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> R
             frames: vec![Frame {
                 attributes: [(
                     "_t".to_string(),
-                    format!("{} {} {}", chunk.origin.x, chunk.origin.y, chunk.origin.z),
+                    format!("{} {} {}", chunk.origin.x, chunk.origin.z, chunk.origin.y),
                 )]
                 .into(),
             }],

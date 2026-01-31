@@ -5,6 +5,7 @@ use image::Rgb;
 use image::Rgba;
 use image::buffer::ConvertBuffer;
 use rayon::prelude::*;
+use std::sync::Mutex;
 
 #[profiling::function]
 fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
@@ -64,41 +65,24 @@ fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
 fn parse_image(
     image_data: &[gltf::image::Data],
     texture: gltf::Texture,
-    source_dir: &str,
 ) -> Result<image::RgbaImage> {
-    let source = texture.source().source();
+    let image_index = texture.source().index();
 
-    match source {
-        gltf::image::Source::Uri { uri, .. } => {
-            let path = format!("{source_dir}/{uri}");
+    let image = image_data
+        .get(image_index)
+        .context("failed to fetch image data (index is out of bounds)")?;
 
-            image::open(path.as_str())
-                .with_context(|| format!("failed to fetch file `{path}` used by the mesh"))
-                .map(|img| img.into_rgba8())
-        }
-
-        gltf::image::Source::View { .. } => {
-            let image = image_data
-                .get(texture.source().index())
-                .context("failed to fetch image data (index is out of bounds)")?;
-
-            convert_image(image).context("failed to convert image")
-        }
-    }
+    convert_image(image).context("failed to convert image")
 }
 
 #[profiling::function]
-fn parse_material(
-    mat: &gltf::Material,
-    image_data: &[gltf::image::Data],
-    source_dir: &str,
-) -> Result<ImageOrColor> {
+fn parse_material(mat: &gltf::Material, image_data: &[gltf::image::Data]) -> Result<ImageOrColor> {
     if let Some(image) = mat
         .pbr_metallic_roughness()
         .base_color_texture()
         .map(|texture_info| texture_info.texture())
     {
-        return parse_image(&image_data, image, source_dir)
+        return parse_image(&image_data, image)
             .context("failed to parse the color image used by the material")
             .map(ImageOrColor::Image);
     }
@@ -107,7 +91,7 @@ fn parse_material(
         .emissive_texture()
         .map(|texture_info| texture_info.texture())
     {
-        return parse_image(&image_data, image, source_dir)
+        return parse_image(&image_data, image)
             .context("failed to parse the emissive image used by the material")
             .map(ImageOrColor::Image);
     }
@@ -117,7 +101,7 @@ fn parse_material(
         .and_then(|spectral| spectral.diffuse_texture())
         .map(|texture_info| texture_info.texture())
     {
-        return parse_image(&image_data, image, source_dir)
+        return parse_image(&image_data, image)
             .context("failed to parse the color image of the spectral material")
             .map(ImageOrColor::Image);
     }
@@ -218,42 +202,60 @@ pub fn load_gltf(path: &str) -> Result<Mesh> {
         gltf::import(path).context("failed to load the gltf file")
     }?;
 
-    let folder = std::path::Path::new(path)
-        .parent()
-        .and_then(|file| file.as_os_str().to_str())
-        .context("failed to read the parent folder of the file")?;
-
-    let mut triangles = Vec::new();
-    let mut triangle_extras = Vec::new();
-
     let mut materials = document
         .materials()
         .collect::<Vec<_>>()
         .par_iter()
-        .map(|material| parse_material(&material, &images, folder))
+        .map(|material| parse_material(&material, &images))
         .collect::<Result<Vec<_>, _>>()
         .context("failed to parse materials")?;
 
     // i.e. default material
     materials.push(ImageOrColor::Color(image::Rgba([255, 255, 255, 255])));
 
-    let mut bounds = BoundingBox::max();
+    let total_triangles: usize = document
+        .meshes()
+        .flat_map(|m| m.primitives())
+        .filter(|p| p.mode() == gltf::mesh::Mode::Triangles)
+        .map(|p| {
+            p.indices()
+                .map(|accessor| accessor.count() / 3)
+                .unwrap_or(0)
+        })
+        .sum();
 
-    for mesh in document.meshes() {
-        parse_mesh(
-            &mesh,
-            &mut bounds,
-            &materials,
-            &buffers,
-            &mut triangles,
-            &mut triangle_extras,
-        )?;
-    }
+    let all_triangles = Mutex::new(Vec::with_capacity(total_triangles));
+    let all_extras = Mutex::new(Vec::with_capacity(total_triangles));
+    let all_bounds = Mutex::new(BoundingBox::zero());
+
+    document
+        .meshes()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        // at least 32 meshes per job to reduce overhead
+        .with_min_len(32)
+        .fold(
+            || (Vec::new(), Vec::new(), BoundingBox::zero()),
+            |mut acc, mesh| {
+                let (tris, extras, bounds) = &mut acc;
+
+                if let Err(e) = parse_mesh(&mesh, bounds, &materials, &buffers, tris, extras) {
+                    eprintln!("Failed to parse mesh: {:?}", e);
+                }
+
+                acc
+            },
+        )
+        .for_each(|(triangles, extras, bounds)| {
+            all_bounds.lock().unwrap().combine(bounds);
+            all_extras.lock().unwrap().extend(extras);
+            all_triangles.lock().unwrap().extend(triangles);
+        });
 
     Ok(Mesh {
         materials,
-        triangles,
-        triangle_extras,
-        bounds,
+        triangles: all_triangles.into_inner().unwrap(),
+        triangle_extras: all_extras.into_inner().unwrap(),
+        bounds: all_bounds.into_inner().unwrap(),
     })
 }

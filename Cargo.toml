@@ -1,13 +1,13 @@
 [package]
 name = "mesh_to_vox"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/szostid/MeshToVox"
-keywords = ["glTF", "3D", "cli"]
+keywords = ["glTF", "3D", "Voxel", "magicavoxel", "dotvox", "cli"]
 description = "A program to convert triangle meshes to voxels."
 
 [dependencies]
-image = { version = "0.25.1" }
+image = { version = "0.25.1", default-features = false, features = ["rayon"] }
 gltf = { version = "1.4.1", default-features = false, features = [
     "import",
     "utils",
@@ -20,5 +20,5 @@ anyhow = "1.0.100"
 rayon = "1.11.0"
 dot_vox = "5.1.1"
 
-tracy-client = "0.18.2"
+tracy-client = "0.18"
 profiling = { version = "1.0.17", features = ["profile-with-tracy"] }
