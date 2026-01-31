@@ -29,7 +29,6 @@ impl InputType {
 }
 
 enum OutputType {
-    Gltf,
     MagicaVoxel,
 }
 
@@ -38,9 +37,8 @@ impl OutputType {
         let extension = get_extension(file)?;
 
         match extension {
-            "gltf" => Ok(Self::Gltf),
             "vox" => Ok(Self::MagicaVoxel),
-            _ => bail!("unknown file extension (only `.gltf` and `.vox` are supported)"),
+            _ => bail!("unknown file extension (only `.vox` is supported)"),
         }
     }
 }
@@ -64,9 +62,6 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
     println!("Mesh is voxelized");
 
     match output_type {
-        OutputType::Gltf => {
-            data.save_as_gltf(&args.output, mesh.view, args.sparse, args.dim, true)?;
-        }
         OutputType::MagicaVoxel => {
             data.save_as_magica_voxel(&args.output)?;
         }

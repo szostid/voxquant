@@ -6,30 +6,6 @@ use image::Rgba;
 use image::buffer::ConvertBuffer;
 use rayon::prelude::*;
 
-/// https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html 5.1.3. accessor.componentType
-trait AccessorComponentType {
-    const ACCESSOR_COMPONENT_TYPE: i32;
-}
-
-impl AccessorComponentType for i8 {
-    const ACCESSOR_COMPONENT_TYPE: i32 = 5120;
-}
-impl AccessorComponentType for u8 {
-    const ACCESSOR_COMPONENT_TYPE: i32 = 5121;
-}
-impl AccessorComponentType for i16 {
-    const ACCESSOR_COMPONENT_TYPE: i32 = 5122;
-}
-impl AccessorComponentType for u16 {
-    const ACCESSOR_COMPONENT_TYPE: i32 = 5123;
-}
-impl AccessorComponentType for i32 {
-    const ACCESSOR_COMPONENT_TYPE: i32 = 5125;
-}
-impl AccessorComponentType for f32 {
-    const ACCESSOR_COMPONENT_TYPE: i32 = 5126;
-}
-
 #[profiling::function]
 fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
     match data.format {
@@ -103,7 +79,7 @@ fn parse_image(
 
         gltf::image::Source::View { .. } => {
             let image = image_data
-                .get(texture.index())
+                .get(texture.source().index())
                 .context("failed to fetch image data (index is out of bounds)")?;
 
             convert_image(image).context("failed to convert image")
@@ -332,116 +308,4 @@ pub fn load_gltf(path: &str) -> Result<Mesh> {
         bounds,
         view,
     })
-}
-
-#[profiling::function]
-pub fn save_gltf(vertices: &[Vertex], gltf_path: &str, view: View, float: bool) -> Result<()> {
-    let bb = BoundingBox::from_points(vertices.iter().map(|v| v.position));
-
-    let size_of_vertices = if float {
-        size_of::<FloatVertex>()
-    } else {
-        size_of::<Vertex>()
-    };
-
-    let num_bytes = vertices.len() * size_of_vertices;
-
-    let buffer = json::object! {
-        uri : "model.bin",
-        byteLength : num_bytes,
-    };
-
-    let vertex_view = json::object! {
-        buffer : 0,
-        byteOffset : 0,
-        byteLength : num_bytes,
-        byteStride : size_of_vertices,
-    };
-
-    let byte_offset = if float {
-        core::mem::offset_of!(FloatVertex, position)
-    } else {
-        core::mem::offset_of!(Vertex, position)
-    };
-
-    let position_accessor = json::object! {
-        bufferView : 0,
-        byteOffset : byte_offset,
-        componentType : f32::ACCESSOR_COMPONENT_TYPE,
-        count : vertices.len(),
-        type : "VEC3",
-
-        max : [bb.max.x, bb.max.y, bb.max.z],
-        min : [bb.min.x, bb.min.y, bb.min.z],
-    };
-
-    let byte_offset = if float {
-        core::mem::offset_of!(FloatVertex, color)
-    } else {
-        core::mem::offset_of!(Vertex, color)
-    };
-    let component_type = if float {
-        f32::ACCESSOR_COMPONENT_TYPE
-    } else {
-        u8::ACCESSOR_COMPONENT_TYPE
-    };
-    let normalized = !float;
-
-    let color_accessor = json::object! {
-        bufferView : 0,
-        byteOffset : byte_offset,
-        componentType : component_type,
-        normalized : normalized,
-        count : vertices.len(),
-        type : "VEC3",
-    };
-
-    let material = json::object! {
-        doubleSided : true,
-    };
-
-    let mesh = json::object! {
-        primitives : [{
-            attributes : {
-                POSITION : 0,
-                COLOR_0 : 1,
-            },
-
-            material : 0
-        }],
-    };
-
-    let gltf = json::object! {
-        materials : [material],
-        scenes : [ {nodes : [ 0 ]} ],
-        nodes : [ {
-            mesh : 0,
-            matrix : mpv_to_json(&view.model_view_projection),
-        }],
-
-        meshes : [mesh],
-        buffers : [buffer],
-        bufferViews : [vertex_view],
-        accessors : [position_accessor, color_accessor],
-        asset : {version : "2.0" }
-    };
-
-    let folder = std::path::Path::new(gltf_path).parent().unwrap();
-    let folder = folder.as_os_str().to_str().unwrap();
-
-    std::fs::create_dir(folder)?;
-    let bin_path = format!("{}/model.bin", folder);
-
-    std::fs::write(gltf_path, gltf.dump())?;
-    if float {
-        let vertices = vertices
-            .iter()
-            .map(|vert| FloatVertex::from(vert.clone()))
-            .collect::<Vec<_>>();
-        std::fs::write(bin_path, bytemuck::cast_slice(&vertices))?;
-    } else {
-        std::fs::write(bin_path, bytemuck::cast_slice(vertices))?;
-    }
-
-    Ok(())
 }

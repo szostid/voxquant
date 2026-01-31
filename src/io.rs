@@ -102,19 +102,8 @@ impl PerspectiveCamera {
             aspect_ratio: value.aspect_ratio(),
         }
     }
-
-    pub fn to_json(&self) -> json::JsonValue {
-        json::object! {
-            "type" : "perspective",
-            perspective : {
-                yfov : self.yfov,
-                znear : self.znear,
-                zfar : self.zfar,
-                aspect_ratio : self.aspect_ratio,
-            }
-        }
-    }
 }
+
 impl OrthographicCamera {
     pub fn new(value: &gltf::camera::Orthographic<'_>) -> Self {
         Self {
@@ -122,18 +111,6 @@ impl OrthographicCamera {
             ymag: value.ymag(),
             zfar: value.zfar(),
             znear: value.znear(),
-        }
-    }
-
-    pub fn to_json(&self) -> json::JsonValue {
-        json::object! {
-            "type": "orthographic",
-            orthographic : {
-                xmag : self.xmag,
-                ymag : self.ymag,
-                zfar : self.zfar,
-                znear : self.znear,
-            }
         }
     }
 }
@@ -155,30 +132,12 @@ impl Camera {
             }
         }
     }
-    pub fn to_json(&self) -> json::JsonValue {
-        match self {
-            Self::PerspectiveCamera(ort) => ort.to_json(),
-            Self::OrthographiCamera(per) => per.to_json(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
 pub struct View {
     pub camera: Option<Camera>,
     pub model_view_projection: Mat4,
-}
-
-pub fn mpv_to_json(mvp: &Mat4) -> json::JsonValue {
-    let mut output: Vec<json::JsonValue> = Vec::with_capacity(16);
-
-    let mvp = mvp.to_cols_array();
-
-    for i in 0..16 {
-        output.push(mvp[i].into());
-    }
-
-    json::JsonValue::Array(output)
 }
 
 mod magica {
@@ -341,51 +300,5 @@ impl Octree {
         data.write_vox(&mut file)?;
 
         Ok(())
-    }
-
-    pub fn save_as_gltf(
-        &self,
-        gltf_path: &str,
-        view: View,
-        sparse: bool,
-        size: u32,
-        float: bool,
-    ) -> Result<()> {
-        let max_size = size - 1;
-
-        let mesh = if sparse {
-            self.fill_space(max_size)
-        } else {
-            let nodes = self.collect_nodes();
-            let mut tris: Vec<Vertex> = Vec::with_capacity(nodes.len() * 36);
-            for (node, color) in &nodes {
-                let color = octree_header::to_color(*color).0;
-                for i in 0..6 {
-                    let node = crate::space_filling::MeshNode {
-                        cords: node.coords,
-                        dim: i / 2,
-                        positive: (i % 2) == 0,
-                        depth: node.depth as u8,
-                    };
-                    let verts = node.to_vertices(self.depth as u8);
-
-                    let verts = verts.map(|vert| {
-                        let position =
-                            ((vert + IVec3::NEG_ONE).as_dvec3() / max_size as f64).as_vec3();
-                        let position = position.mul_add(Vec3::splat(2.0), Vec3::NEG_ONE);
-
-                        Vertex { position, color }
-                    });
-
-                    for vert in verts {
-                        tris.push(vert);
-                    }
-                }
-            }
-
-            tris
-        };
-
-        gltf2::save_gltf(&mesh, gltf_path, view, float)
     }
 }

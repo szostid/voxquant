@@ -13,7 +13,6 @@ gltf = { version = "1.4.1", default-features = false, features = [
     "utils",
     "KHR_materials_pbrSpecularGlossiness",
 ] }
-json = { version = "0.12.4", default-features = false }
 clap = { version = "4.5.4", features = ["derive"] }
 glam = { version = "0.30.9", features = ["bytemuck"] }
 bytemuck = "1.24.0"
