@@ -4,11 +4,10 @@
 mod gltf2;
 mod io;
 mod math;
-mod octree;
 mod voxelizer;
 
-use crate::voxelizer::{VoxelizationMode, voxelize};
 use clap::Parser;
+use voxelizer::{VoxelizationMode, voxelize};
 
 use anyhow::*;
 use math::*;
@@ -57,13 +56,13 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
 
     println!("Mesh is loaded");
 
-    let data = voxelize(&mesh, args.dim, VoxelizationMode::Triangles);
+    let data = voxelize(&mesh, args.res, VoxelizationMode::Triangles);
 
     println!("Mesh is voxelized");
 
     match output_type {
         OutputType::MagicaVoxel => {
-            data.save_as_magica_voxel(&args.output)?;
+            io::save_as_magica_voxel(data, &args.output)?;
         }
     }
 
@@ -92,11 +91,8 @@ struct Args {
     output: String,
 
     /// The resolution of the output model
-    #[arg(long, default_value_t = 1022)]
-    dim: u32,
-
-    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
-    sparse: bool,
+    #[arg(long, default_value_t = 1024)]
+    res: u32,
 }
 
 fn main() -> Result<()> {

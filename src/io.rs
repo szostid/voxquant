@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-use crate::octree::*;
 use crate::*;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
@@ -67,165 +64,142 @@ pub struct Mesh {
     pub bounds: BoundingBox,
 }
 
-mod magica {
-    pub const fn encode(color: image::Rgba<u8>) -> u8 {
-        let color = color.0;
-        (color[0] >> 5) | ((color[1] >> 5) << 3) | ((color[2] >> 6) << 6)
+pub mod magica {
+    // 6 shades of Red (0..5)
+    // 7 shades of Green (0..6)
+    // 6 shades of Blue (0..5)
+    const R_STEPS: u16 = 6;
+    const G_STEPS: u16 = 7;
+    const B_STEPS: u16 = 6;
+
+    /// Maps an RGBA color to a palette index (1-253).
+    /// Index 0 is reserved for 'Air' in MagicaVoxel, so we shift everything by +1.
+    pub const fn encode_color(color: [u8; 4]) -> u8 {
+        let r = color[0] as u16;
+        let g = color[1] as u16;
+        let b = color[2] as u16;
+
+        let r_idx = (r * (R_STEPS - 1) + 127) / 255;
+        let g_idx = (g * (G_STEPS - 1) + 127) / 255;
+        let b_idx = (b * (B_STEPS - 1) + 127) / 255;
+
+        let packed = r_idx + (g_idx * R_STEPS) + (b_idx * R_STEPS * G_STEPS);
+
+        (packed + 1) as u8
     }
 
-    pub const fn decode(byte: u8) -> image::Rgba<u8> {
-        let mask3 = (1 << 3) - 1;
-        let mask2 = (1 << 2) - 1;
-
-        let r = (byte & mask3) << 5;
-        let g = ((byte >> 3) & mask3) << 5;
-        let b = ((byte >> 6) & mask2) << 6;
-
-        image::Rgba([r, g, b, 255])
-    }
-
-    #[cfg(test)]
-    pub const fn _gather() {
-        let mut counter = 0;
-        loop {
-            if encode(decode(counter)) != counter {
-                panic!()
-            }
-            if counter == u8::MAX {
-                break;
-            }
-            counter += 1;
+    /// Maps a palette index (1-253) back to an RGBA color.
+    pub const fn decode_color(byte: u8) -> [u8; 4] {
+        if byte == 0 {
+            return [0, 0, 0, 0];
         }
-    }
 
-    #[cfg(test)]
-    pub const _: () = _gather();
+        let val = (byte - 1) as u16;
+
+        let r_idx = val % R_STEPS;
+        let g_idx = (val / R_STEPS) % G_STEPS;
+        let b_idx = (val / (R_STEPS * G_STEPS)) % B_STEPS;
+
+        // scale back to 0..255
+        let r = (r_idx * 255) / (R_STEPS - 1);
+        let g = (g_idx * 255) / (G_STEPS - 1);
+        let b = (b_idx * 255) / (B_STEPS - 1);
+
+        [r as u8, g as u8, b as u8, 255]
+    }
 }
 
-impl Octree {
-    pub fn save_as_magica_voxel(&self, file_path: &str) -> Result<()> {
-        use dot_vox::*;
+pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> Result<()> {
+    use dot_vox::*;
 
-        const CHUNK_SIZE: i32 = 256;
+    // the palette starts at index 1 and ends later because magicavoxel only allows for 255
+    // indices and reserves the first index for a black color. we can therefore skip the black
+    // color
+    let mut palette = Vec::with_capacity(256);
 
-        let nodes = self.collect_nodes();
+    for index in 0..=255 {
+        let color = magica::decode_color(index);
+        palette.push(dot_vox::Color {
+            r: color[0],
+            g: color[1],
+            b: color[2],
+            a: 255,
+        });
+    }
 
-        let mut chunks = HashMap::<IVec3, Vec<dot_vox::Voxel>>::new();
+    let mut models = Vec::new();
+    let mut nodes = Vec::new();
 
-        // the palette starts at index 1 and ends later because magicavoxel only allows for 254
-        // indices and reserves the first index for a black color. we can therefore skip the black
-        // color
-        let mut palette = Vec::with_capacity(256);
+    nodes.push(SceneNode::Transform {
+        attributes: Default::default(),
+        frames: vec![Frame {
+            attributes: Default::default(),
+        }],
+        child: 1,
+        layer_id: 0,
+    });
 
-        for index in 1..=255 {
-            let color = magica::decode(index);
-            palette.push(dot_vox::Color {
-                r: color.0[0],
-                g: color.0[1],
-                b: color.0[2],
-                a: 255,
-            });
-        }
+    nodes.push(SceneNode::Group {
+        attributes: Default::default(),
+        children: Vec::new(),
+    });
 
-        for (coords, color) in nodes {
-            let color = octree_header::to_color(color);
-            let color_idx = magica::encode(color);
+    for chunk in chunks {
+        let model_id = models.len() as u32;
 
-            let chunk = coords.coords / CHUNK_SIZE;
-            let local_coords = (coords.coords % CHUNK_SIZE).as_u8vec3();
+        models.push(Model {
+            size: Size {
+                x: 256,
+                y: 256,
+                z: 256,
+            },
+            voxels: chunk.voxels,
+        });
 
-            chunks.entry(chunk).or_default().push(dot_vox::Voxel {
-                x: local_coords.x,
-                y: local_coords.z,
-                z: local_coords.y,
-                // as said previously, the palette starts at index 1, and dot_vox
-                // will offset this index by adding one to it. we want black indices
-                // to be `0` after this operation, so they have to be `255` before
-                // this operation, we can perform a wrapping subtraction to achieve that
-                i: color_idx.wrapping_sub(1),
-            });
-        }
-
-        let mut models = Vec::new();
-        let mut nodes = Vec::new();
+        let transform_index = nodes.len() as u32;
+        let shape_index = transform_index + 1;
 
         nodes.push(SceneNode::Transform {
             attributes: Default::default(),
             frames: vec![Frame {
-                attributes: Default::default(),
+                attributes: [(
+                    "_t".to_string(),
+                    format!("{} {} {}", chunk.origin.x, chunk.origin.y, chunk.origin.z),
+                )]
+                .into(),
             }],
-            child: 1,
+            child: shape_index,
             layer_id: 0,
         });
 
-        nodes.push(SceneNode::Group {
+        nodes.push(SceneNode::Shape {
             attributes: Default::default(),
-            children: Vec::new(),
+            models: vec![ShapeModel {
+                model_id,
+                attributes: Default::default(),
+            }],
         });
 
-        for (chunk, voxels) in chunks {
-            let model_id = models.len() as u32;
-
-            models.push(Model {
-                size: Size {
-                    x: CHUNK_SIZE as u32,
-                    y: CHUNK_SIZE as u32,
-                    z: CHUNK_SIZE as u32,
-                },
-                voxels,
-            });
-
-            let transform_index = nodes.len() as u32;
-            let shape_index = transform_index + 1;
-
-            nodes.push(SceneNode::Transform {
-                attributes: Default::default(),
-                frames: vec![Frame {
-                    attributes: [(
-                        "_t".to_string(),
-                        format!(
-                            "{} {} {}",
-                            chunk.x * CHUNK_SIZE,
-                            chunk.z * CHUNK_SIZE,
-                            chunk.y * CHUNK_SIZE
-                        ),
-                    )]
-                    .into(),
-                }],
-                child: shape_index,
-                layer_id: 0,
-            });
-
-            nodes.push(SceneNode::Shape {
-                attributes: Default::default(),
-                models: vec![ShapeModel {
-                    model_id,
-                    attributes: Default::default(),
-                }],
-            });
-
-            let SceneNode::Group { children, .. } = &mut nodes[1] else {
-                unreachable!()
-            };
-
-            children.push(transform_index);
-        }
-
-        // Construct the scene
-        let data = dot_vox::DotVoxData {
-            version: 150,
-            models,
-            palette,
-            materials: Vec::new(),
-            layers: Vec::new(),
-            scenes: nodes,
+        let SceneNode::Group { children, .. } = &mut nodes[1] else {
+            unreachable!()
         };
 
-        // Write the file
-        let mut file = std::fs::File::create(file_path)?;
-
-        data.write_vox(&mut file)?;
-
-        Ok(())
+        children.push(transform_index);
     }
+
+    // Construct the scene
+    let data = dot_vox::DotVoxData {
+        version: 150,
+        models,
+        palette,
+        materials: Vec::new(),
+        layers: Vec::new(),
+        scenes: nodes,
+    };
+
+    let mut file = std::fs::File::create(file_path)?;
+
+    data.write_vox(&mut file)?;
+
+    Ok(())
 }

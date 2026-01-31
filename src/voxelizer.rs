@@ -1,15 +1,47 @@
 use crate::io::{ImageOrColor, Mesh};
 use crate::math::{closest_point_triangle, get_barycentric_coordinates};
-use crate::octree::*;
+use dot_vox::Voxel;
 use glam::*;
+use rayon::prelude::*;
+use std::collections::HashMap;
 
-fn voxelize_wireframe(store: &mut Octree, shading: &Shading, tri_pos: [Vec3; 3]) {
+pub struct Chunk {
+    pub voxels: Vec<dot_vox::Voxel>,
+    pub origin: IVec3,
+}
+
+impl Chunk {
+    pub fn new(origin: IVec3) -> Self {
+        Self {
+            voxels: Vec::new(),
+            origin,
+        }
+    }
+
+    pub fn add_voxel(&mut self, position: IVec3, value: image::Rgba<u8>) {
+        let pos_in_chunk = position - self.origin;
+
+        let Ok(pos_in_chunk) = U8Vec3::try_from(pos_in_chunk) else {
+            return;
+        };
+
+        // GLTF is Y-up magicavoxel is Z-up
+        self.voxels.push(Voxel {
+            x: pos_in_chunk.x,
+            y: pos_in_chunk.z,
+            z: pos_in_chunk.y,
+            i: crate::io::magica::encode_color(value.0),
+        });
+    }
+}
+
+fn voxelize_wireframe(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) {
     voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
     voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
     voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
 }
 
-fn voxelize_triangle(store: &mut Octree, shading: &Shading, tri_pos: [Vec3; 3]) {
+fn voxelize_triangle(store: &mut Chunk, shading: &Shading, tri_pos: [Vec3; 3]) {
     const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
 
     let (a, b, ab) = LINES
@@ -34,7 +66,7 @@ fn voxelize_triangle(store: &mut Octree, shading: &Shading, tri_pos: [Vec3; 3]) 
 }
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
-fn voxelize_line(store: &mut Octree, shading: &Shading, p1: Vec3, p2: Vec3) {
+fn voxelize_line(store: &mut Chunk, shading: &Shading, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -65,7 +97,7 @@ fn voxelize_line(store: &mut Octree, shading: &Shading, p1: Vec3, p2: Vec3) {
 
         // alpha cutoff
         if color.0[3] > 128 {
-            store.store(map_pos, color);
+            store.add_voxel(map_pos, color.into());
         }
 
         if map_pos == end {
@@ -79,9 +111,9 @@ fn voxelize_line(store: &mut Octree, shading: &Shading, p1: Vec3, p2: Vec3) {
     }
 }
 
-fn voxelize_point(store: &mut Octree, point: Vec3) {
+fn voxelize_point(store: &mut Chunk, point: Vec3) {
     let point = point.round().as_ivec3();
-    store.store(point, image::Rgba([32, 32, 32, 255]));
+    store.add_voxel(point, image::Rgba([32, 32, 32, 255]));
 }
 
 #[derive(Debug)]
@@ -132,27 +164,26 @@ pub enum VoxelizationMode {
 }
 
 #[profiling::function]
-pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode) -> Octree {
-    let num_tris = mesh.triangles.len();
-
-    // leave one voxel gap around model to allow for inside/outside checking
-    let max_size = size - 1;
-    let depth = 31 - (size + 1).leading_zeros();
-
+fn voxelize_chunk(
+    mesh: &Mesh,
+    size: u32,
+    chunk_tris: &[usize],
+    chunk_base: IVec3,
+    mode: VoxelizationMode,
+) -> Chunk {
     let largest_dim = mesh.bounds.size().max_element();
 
-    let scale = max_size as f32 / largest_dim;
+    let scale = size as f32 / largest_dim;
 
-    let mut tree = Octree::new(depth);
+    let mut chunk = Chunk::new(chunk_base);
 
-    for tri in 0..num_tris {
+    for &tri in chunk_tris {
         // we have to translate every vertex into a position relative to
         // the bounds of the storage, and then scaled to fit as well as
         // possible
         let vertices = mesh.triangles[tri]
             .map(|vertex| vertex - mesh.bounds.min)
-            .map(|vertex| vertex * scale)
-            .map(|vertex| vertex + Vec3::ONE);
+            .map(|vertex| vertex * scale);
 
         let mat_id = mesh.triangle_extras[tri][0].material_idx;
         let material = mesh
@@ -177,18 +208,56 @@ pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode) -> Octree {
 
         match mode {
             VoxelizationMode::Triangles => {
-                voxelize_triangle(&mut tree, &shading, vertices);
+                voxelize_triangle(&mut chunk, &shading, vertices);
             }
             VoxelizationMode::Lines => {
-                voxelize_wireframe(&mut tree, &shading, vertices);
+                voxelize_wireframe(&mut chunk, &shading, vertices);
             }
             VoxelizationMode::Points => {
                 for point in vertices {
-                    voxelize_point(&mut tree, point);
+                    voxelize_point(&mut chunk, point);
                 }
             }
         }
     }
 
-    tree
+    chunk
+}
+
+#[profiling::function]
+fn group_triangles(mesh: &Mesh, size: u32) -> HashMap<IVec3, Vec<usize>> {
+    let mut chunks = HashMap::<IVec3, Vec<usize>>::new();
+
+    let largest_dim = mesh.bounds.size().max_element();
+    let scale = size as f32 / largest_dim;
+
+    for (idx, tri) in mesh.triangles.iter().enumerate() {
+        let voxel_verts = tri
+            .map(|vertex| vertex - mesh.bounds.min)
+            .map(|vertex| vertex * scale);
+
+        let min = voxel_verts[0].min(voxel_verts[1]).min(voxel_verts[2]);
+        let max = voxel_verts[0].max(voxel_verts[1]).max(voxel_verts[2]);
+
+        let min_chunk = (min / 256.0).floor().as_ivec3();
+        let max_chunk = (max / 256.0).floor().as_ivec3();
+
+        for z in min_chunk.z..=max_chunk.z {
+            for y in min_chunk.y..=max_chunk.y {
+                for x in min_chunk.x..=max_chunk.x {
+                    chunks.entry(IVec3::new(x, y, z)).or_default().push(idx);
+                }
+            }
+        }
+    }
+
+    chunks
+}
+
+#[profiling::function]
+pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode) -> Vec<Chunk> {
+    group_triangles(mesh, size)
+        .into_par_iter()
+        .map(|(chunk_idx, tris)| voxelize_chunk(mesh, size, &tris, chunk_idx * 256, mode))
+        .collect()
 }
