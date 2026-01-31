@@ -9,7 +9,7 @@ mod voxelizer;
 use clap::Parser;
 use voxelizer::{VoxelizationMode, voxelize};
 
-use anyhow::*;
+use anyhow::{Context as _, Result, bail};
 use math::*;
 
 enum InputType {

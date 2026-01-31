@@ -1,9 +1,5 @@
 use crate::io::*;
 use crate::*;
-use image::ImageBuffer;
-use image::Rgb;
-use image::Rgba;
-use image::buffer::ConvertBuffer;
 use rayon::prelude::*;
 
 struct MeshInstance<'a> {
@@ -34,55 +30,51 @@ fn collect_instances<'a>(
 
 #[profiling::function]
 fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
+    use bytemuck::{Pod, PodCastError};
+    use gltf::image::Format;
+    use image::Pixel;
+    use image::buffer::ConvertBuffer;
+    use image::{ImageBuffer, Luma, LumaA, Rgb, Rgba, RgbaImage};
+    use std::borrow::Cow;
+
+    /// Given `data`, converts the image (assumed to have
+    /// the pixel format `P`) into an Rgba8 image
+    fn convert_image<P: Pixel>(data: &gltf::image::Data) -> Result<RgbaImage>
+    where
+        P::Subpixel: Pod,
+        for<'a> ImageBuffer<P, Cow<'a, [P::Subpixel]>>: ConvertBuffer<RgbaImage>,
+    {
+        fn convert_bytes<T: Pod>(bytes: &[u8]) -> Result<Cow<'_, [T]>> {
+            match bytemuck::try_cast_slice::<u8, T>(bytes) {
+                Ok(slice) => Ok(Cow::Borrowed(slice)),
+                Err(PodCastError::AlignmentMismatch) => {
+                    Ok(Cow::Owned(bytemuck::pod_collect_to_vec(bytes)))
+                }
+                Err(e) => Err(anyhow::anyhow!(e)),
+            }
+        }
+
+        let pixels = convert_bytes(&data.pixels).context("cannot convert texture contents")?;
+
+        ImageBuffer::from_raw(data.width, data.height, pixels)
+            .context("image has invalid dimensions")
+            .map(|img| img.convert())
+    }
+
     match data.format {
-        gltf::image::Format::R32G32B32FLOAT => {
-            let pixels: &[f32] = bytemuck::cast_slice(&data.pixels);
+        Format::R32G32B32FLOAT => convert_image::<Rgb<f32>>(data),
+        Format::R32G32B32A32FLOAT => convert_image::<Rgba<f32>>(data),
 
-            ImageBuffer::<Rgb<f32>, _>::from_raw(data.width, data.height, pixels.to_vec())
-                .context("image has invalid dimensions")
-                .map(|img| img.convert())
-        }
+        Format::R16 => convert_image::<Luma<u16>>(data),
+        Format::R16G16 => convert_image::<LumaA<u16>>(data),
+        Format::R16G16B16 => convert_image::<Rgb<u16>>(data),
+        Format::R16G16B16A16 => convert_image::<Rgba<u16>>(data),
 
-        gltf::image::Format::R16G16B16 => {
-            let pixels: &[u16] = bytemuck::cast_slice(&data.pixels);
-
-            ImageBuffer::<Rgb<u16>, _>::from_raw(data.width, data.height, pixels.to_vec())
-                .context("image has invalid dimensions")
-                .map(|img| img.convert())
-        }
-
-        gltf::image::Format::R8G8B8 => {
-            let pixels = data.pixels.clone();
-
-            ImageBuffer::<Rgb<u8>, _>::from_raw(data.width, data.height, pixels)
-                .context("image has invalid dimensions")
-                .map(|img| img.convert())
-        }
-
-        gltf::image::Format::R32G32B32A32FLOAT => {
-            let pixels: &[f32] = bytemuck::cast_slice(&data.pixels);
-
-            ImageBuffer::<Rgba<f32>, _>::from_raw(data.width, data.height, pixels.to_vec())
-                .context("image has invalid dimensions")
-                .map(|img| img.convert())
-        }
-
-        gltf::image::Format::R16G16B16A16 => {
-            let pixels: &[u16] = bytemuck::cast_slice(&data.pixels);
-
-            ImageBuffer::<Rgba<u16>, _>::from_raw(data.width, data.height, pixels.to_vec())
-                .context("image has invalid dimensions")
-                .map(|img| img.convert())
-        }
-
-        gltf::image::Format::R8G8B8A8 => {
-            let pixels = data.pixels.clone();
-
-            ImageBuffer::<Rgba<u8>, _>::from_raw(data.width, data.height, pixels)
-                .context("image has invalid dimensions")
-        }
-
-        _ => bail!("format {:?} is unsupported", data.format),
+        Format::R8 => convert_image::<Luma<u8>>(data),
+        Format::R8G8 => convert_image::<LumaA<u8>>(data),
+        Format::R8G8B8 => convert_image::<Rgb<u8>>(data),
+        Format::R8G8B8A8 => RgbaImage::from_raw(data.width, data.height, data.pixels.clone())
+            .context("image has invalid dimensions"),
     }
 }
 
