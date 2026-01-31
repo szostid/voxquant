@@ -20,5 +20,5 @@ Options:
 [Cargo](https://www.rust-lang.org/tools/install 'Cargo') is requried for installation. Clone the repo and run with `cargo run --release -- (arguments)`
 
 ## Examples
-This is an example of the sponza scene voxelized at a resolution of `4094`
-<img src="examples/sponza.png" alt="example"/>
+This is an example of the [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) scene voxelized at a resolution of `4094`
+<img src="examples/bistro.png" alt="example"/>

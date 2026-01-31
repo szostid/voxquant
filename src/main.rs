@@ -10,8 +10,8 @@ mod voxelizer;
 use crate::voxelizer::{VoxelizationMode, voxelize};
 use clap::Parser;
 
-pub use anyhow::*;
-pub use math::*;
+use anyhow::*;
+use math::*;
 
 enum InputType {
     GlbGltf,
