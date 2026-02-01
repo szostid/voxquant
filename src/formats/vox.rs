@@ -1,5 +1,9 @@
 use crate::*;
+use dot_vox::Model;
 use glam::IVec3;
+use quantette::{ImageRef, PaletteSize, Pipeline, QuantizeMethod, deps::palette::rgb::Rgb};
+use rayon::prelude::*;
+use voxelizer::Chunk;
 
 // 6 shades of Red (0..5)
 // 7 shades of Green (0..6)
@@ -45,11 +49,185 @@ pub const fn decode_color(byte: u8) -> [u8; 4] {
 }
 
 #[profiling::function]
+pub fn quantize_colors(
+    chunks: Vec<Chunk<voxelizer::VoxelWithColor>>,
+) -> (Vec<Model>, Vec<IVec3>, Vec<dot_vox::Color>) {
+    let voxel_colors = {
+        profiling::scope!("extract_colors");
+
+        chunks
+            .par_iter()
+            .with_min_len(128)
+            .flat_map_iter(|chunk| {
+                chunk
+                    .voxels
+                    .iter()
+                    .map(|v| Rgb::new(v.color[0], v.color[1], v.color[2]))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    if voxel_colors.is_empty() {
+        return (Vec::new(), Vec::new(), Vec::new());
+    }
+
+    let output = Pipeline::new()
+        .quantize_method(QuantizeMethod::Wu)
+        .palette_size(PaletteSize::MAX)
+        .ditherer(None)
+        .parallel(true)
+        .input_image(ImageRef::new(voxel_colors.len() as u32, 1, &voxel_colors).unwrap())
+        .output_srgb8_indexed_image();
+
+    let palette = output
+        .palette()
+        .iter()
+        .map(|c| dot_vox::Color {
+            r: c.red,
+            g: c.green,
+            b: c.blue,
+            a: 255,
+        })
+        .collect::<Vec<_>>();
+
+    let indices = output.indices();
+
+    // We zip chunks with their corresponding slice of indices
+    // This allows us to process every chunk deeply in parallel without locking.
+    let (models, origins) = chunks
+        .into_iter()
+        .scan(0, |offset, chunk| {
+            let start = *offset;
+            let size = chunk.voxels.len();
+            *offset += size;
+            Some((chunk, &indices[start..start + size]))
+        })
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .with_min_len(128)
+        .map(|(chunk, voxel_indices)| {
+            profiling::scope!("Chunk::remap_indices");
+
+            let new_voxels = chunk
+                .voxels
+                .iter()
+                .zip(voxel_indices)
+                .map(|(raw, &idx)| dot_vox::Voxel {
+                    x: raw.pos.x,
+                    y: raw.pos.y,
+                    z: raw.pos.z,
+                    i: idx,
+                })
+                .collect();
+
+            (
+                Model {
+                    size: dot_vox::Size {
+                        x: 256,
+                        y: 256,
+                        z: 256,
+                    },
+                    voxels: new_voxels,
+                },
+                chunk.origin,
+            )
+        })
+        .collect::<(Vec<_>, Vec<_>)>();
+
+    (models, origins, palette)
+}
+
+#[profiling::function]
 #[expect(
     clippy::default_trait_access,
     reason = "we don't have access to the AHashMap type"
 )]
-pub fn save_vox(chunks: Vec<voxelizer::Chunk>, file_path: &Path, shift: IVec3) -> Result<()> {
+pub fn save_vox_dynamic(
+    chunks: Vec<voxelizer::Chunk<voxelizer::VoxelWithColor>>,
+    file_path: &Path,
+    shift: IVec3,
+) -> Result<()> {
+    use dot_vox::*;
+
+    let (models, origins, palette) = quantize_colors(chunks);
+
+    let mut nodes = Vec::new();
+
+    nodes.push(SceneNode::Transform {
+        attributes: Default::default(),
+        frames: vec![Frame {
+            attributes: Default::default(),
+        }],
+        child: 1,
+        layer_id: 0,
+    });
+
+    nodes.push(SceneNode::Group {
+        attributes: Default::default(),
+        children: Vec::new(),
+    });
+
+    for (model_id, origin) in origins.into_iter().enumerate() {
+        let transform_index = nodes.len() as u32;
+        let shape_index = transform_index + 1;
+
+        let origin = origin + shift;
+
+        nodes.push(SceneNode::Transform {
+            attributes: Default::default(),
+            frames: vec![Frame {
+                attributes: [(
+                    "_t".to_string(),
+                    format!("{} {} {}", origin.x, origin.y, origin.z),
+                )]
+                .into(),
+            }],
+            child: shape_index,
+            layer_id: 0,
+        });
+
+        nodes.push(SceneNode::Shape {
+            attributes: Default::default(),
+            models: vec![ShapeModel {
+                model_id: model_id as u32,
+                attributes: Default::default(),
+            }],
+        });
+
+        let SceneNode::Group { children, .. } = &mut nodes[1] else {
+            unreachable!()
+        };
+
+        children.push(transform_index);
+    }
+
+    // Construct the scene
+    let data = DotVoxData {
+        version: 150,
+        models,
+        palette,
+        materials: Vec::new(),
+        layers: Vec::new(),
+        scenes: nodes,
+    };
+
+    let mut file = std::fs::File::create(file_path)?;
+
+    data.write_vox(&mut file)?;
+
+    Ok(())
+}
+
+#[profiling::function]
+#[expect(
+    clippy::default_trait_access,
+    reason = "we don't have access to the AHashMap type"
+)]
+pub fn save_vox_static(
+    chunks: Vec<voxelizer::Chunk<dot_vox::Voxel>>,
+    file_path: &Path,
+    shift: IVec3,
+) -> Result<()> {
     use dot_vox::*;
 
     // the palette starts at index 1 and ends later because magicavoxel only allows for 255

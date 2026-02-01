@@ -1,17 +1,57 @@
 use crate::*;
-use dot_vox::Voxel;
 use glam::{IVec3, U8Vec3, Vec2, Vec3};
 use rayon::prelude::*;
 use scene::{Mesh, WrapMode};
 use std::collections::HashMap;
 
+pub trait VoxelType {
+    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self;
+    fn pos(&self) -> U8Vec3;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct VoxelWithColor {
+    pub pos: U8Vec3,
+    pub color: Rgba<u8>,
+}
+
+impl VoxelType for VoxelWithColor {
+    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
+        Self { pos, color }
+    }
+
+    fn pos(&self) -> U8Vec3 {
+        self.pos
+    }
+}
+
+impl VoxelType for dot_vox::Voxel {
+    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
+        Self {
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+            i: formats::vox::encode_color(color.0),
+        }
+    }
+
+    fn pos(&self) -> U8Vec3 {
+        U8Vec3 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
+    }
+}
+
 /// 256x256x256 Chunk of a magicavoxel model
-pub struct Chunk {
-    pub voxels: Vec<dot_vox::Voxel>,
+#[derive(Clone)]
+pub struct Chunk<T: VoxelType> {
+    pub voxels: Vec<T>,
     pub origin: IVec3,
 }
 
-impl Chunk {
+impl<T: VoxelType> Chunk<T> {
     pub const fn new(origin: IVec3) -> Self {
         Self {
             voxels: Vec::new(),
@@ -28,28 +68,29 @@ impl Chunk {
             return;
         };
 
-        self.voxels.push(Voxel {
-            x: pos_in_chunk.x,
-            y: pos_in_chunk.y,
-            z: pos_in_chunk.z,
-            i: crate::formats::vox::encode_color(color.0),
-        });
+        self.voxels.push(T::from_pos_color(pos_in_chunk, color));
     }
 
     #[profiling::function]
     pub fn optimize(&mut self) {
         // i've found that sorting by the material index to ensure that during deduplication
         // we prefer brighter colors over dark colors makes everything look much nicer
-        self.voxels
-            .sort_unstable_by_key(|v| u32::from_be_bytes([v.z, v.y, v.x, 255 - v.i]));
+        self.voxels.sort_unstable_by_key(|v| {
+            let pos = v.pos();
+            u32::from_be_bytes([0, pos.z, pos.y, pos.x])
+        });
 
-        self.voxels.dedup_by_key(|v| (v.x, v.y, v.z));
+        self.voxels.dedup_by_key(|v| v.pos());
     }
 }
 
 /// Voxelizes the edges of the provided `triangle`.
 #[inline]
-fn voxelize_wireframe(store: &mut Chunk, shading: &TriangleData, triangle: Triangle) {
+fn voxelize_wireframe<T: VoxelType>(
+    store: &mut Chunk<T>,
+    shading: &TriangleData,
+    triangle: Triangle,
+) {
     voxelize_line(store, shading, triangle[0], triangle[1]);
     voxelize_line(store, shading, triangle[1], triangle[2]);
     voxelize_line(store, shading, triangle[0], triangle[2]);
@@ -62,8 +103,8 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &TriangleData, triangle: Trian
 #[inline]
 #[expect(clippy::similar_names, reason = "`u` vs `v` is quite clear")]
 #[expect(clippy::suboptimal_flops, reason = "FMA makes the function unreadable")]
-fn voxelize_triangle(
-    store: &mut Chunk,
+fn voxelize_triangle<T: VoxelType>(
+    store: &mut Chunk<T>,
     shading: &TriangleData,
     triangle: Triangle,
     chunk_origin: IVec3,
@@ -197,7 +238,7 @@ fn voxelize_triangle(
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
 #[inline]
-fn voxelize_line(store: &mut Chunk, shading: &TriangleData, p1: Vec3, p2: Vec3) {
+fn voxelize_line<T: VoxelType>(store: &mut Chunk<T>, shading: &TriangleData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -241,7 +282,7 @@ fn voxelize_line(store: &mut Chunk, shading: &TriangleData, p1: Vec3, p2: Vec3) 
 
 /// Voxelizes the points of the provided `triangle`
 #[inline]
-fn voxelize_points(store: &mut Chunk, shading: &TriangleData, triangle: Triangle) {
+fn voxelize_points<T: VoxelType>(store: &mut Chunk<T>, shading: &TriangleData, triangle: Triangle) {
     let [a, b, c] = triangle.vertices.map(|p| p.pos.as_ivec3());
 
     store.add_voxel(a, shading.sample_from_bary(Vec3::X));
@@ -315,14 +356,14 @@ impl TriangleData<'_> {
 }
 
 #[profiling::function]
-fn voxelize_chunk(
+fn voxelize_chunk<T: VoxelType>(
     mesh: &Mesh,
     size: u32,
     chunk_tris: &[usize],
     chunk_base: IVec3,
     mode: VoxelizationMode,
     optimize: bool,
-) -> Chunk {
+) -> Chunk<T> {
     let largest_dim = mesh.bounds.size().max_element();
 
     let scale = size as f32 / largest_dim;
@@ -413,7 +454,12 @@ fn group_triangles(mesh: &Mesh, size: u32) -> HashMap<IVec3, Vec<usize>> {
 
 /// The core algorythm that voxelizes the mesh.
 #[profiling::function]
-pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode, optimize: bool) -> Vec<Chunk> {
+pub fn voxelize<T: VoxelType + Send>(
+    mesh: &Mesh,
+    size: u32,
+    mode: VoxelizationMode,
+    optimize: bool,
+) -> Vec<Chunk<T>> {
     group_triangles(mesh, size)
         .into_par_iter()
         .map(|(chunk_idx, tris)| voxelize_chunk(mesh, size, &tris, chunk_idx * 256, mode, optimize))

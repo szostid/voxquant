@@ -8,7 +8,7 @@
 )]
 
 use anyhow::{Context as _, Result, bail};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use image::{Rgba, RgbaImage};
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ mod voxelizer;
 
 use geometry::{BoundingBox, Triangle};
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum VoxelizationMode {
     #[value(name = "triangles")]
     Triangles,
@@ -38,6 +38,23 @@ impl Display for VoxelizationMode {
             Self::Triangles => f.write_str("triangles"),
             Self::Wireframe => f.write_str("wireframe"),
             Self::Points => f.write_str("points"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ColorMode {
+    #[value(name = "static")]
+    Static,
+    #[value(name = "dynamic")]
+    Dynamic,
+}
+
+impl Display for ColorMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Static => f.write_str("static"),
+            Self::Dynamic => f.write_str("dynamic"),
         }
     }
 }
@@ -124,7 +141,7 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
 
             let center_offset = -(voxel_bounds_size / 2.0).round().as_ivec3() + 128;
 
-            formats::vox::save_vox(data, &args.output, center_offset)?;
+            formats::vox::save_vox_dynamic(data, &args.output, center_offset)?;
         }
     }
 
@@ -140,29 +157,34 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
 pub struct Args {
     /// The input file that will be voxelized
     #[arg(short, long)]
-    input: PathBuf,
+    pub input: PathBuf,
 
     /// The output file after voxelization
     #[arg(short, long)]
-    output: PathBuf,
+    pub output: PathBuf,
 
     /// The resolution of the output model
     #[arg(short, long, default_value_t = 1024)]
-    res: u32,
+    pub res: u32,
 
     /// The scale of the output model
     #[arg(long, default_value_t = 1.0)]
-    base_scale: f32,
+    pub base_scale: f32,
 
     /// The mode of voxelization. Defaults to triangles,
     /// but you can voxelize the wireframe or vertices
     /// instead.
     #[arg(long, default_value_t = VoxelizationMode::Triangles)]
-    mode: VoxelizationMode,
+    pub mode: VoxelizationMode,
+
+    /// The palette generation mode. Dynamic palette looks
+    /// much better, but the static palette is much faster.
+    #[arg(long, default_value_t = ColorMode::Dynamic)]
+    pub color: ColorMode,
 
     /// With this option, if two triangles share a voxel,
     /// both voxels will be present in the output file
     /// (magicavoxel will likely present the last one)
     #[arg(long, default_value_t = false)]
-    no_optimization: bool,
+    pub no_optimization: bool,
 }

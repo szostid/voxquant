@@ -20,8 +20,10 @@ anyhow = "1.0.100"
 rayon = "1.11.0"
 dot_vox = "5.1.1"
 
+
 tracy-client = { version = "0.18", optional = true }
 profiling = { version = "1.0.17" }
+quantette = "0.5.1"
 
 [features]
 profiling = ["profiling/profile-with-tracy", "dep:tracy-client"]
