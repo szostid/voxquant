@@ -164,9 +164,8 @@ struct MeshScratch {
 }
 
 #[profiling::function]
-fn parse_mesh(
-    mesh: &gltf::Mesh,
-    transform: Mat4,
+fn parse_mesh_instance(
+    instance: MeshInstance,
     bounds: &mut BoundingBox,
     materials: &[ImageOrColor],
     buffers: &[gltf::buffer::Data],
@@ -174,18 +173,58 @@ fn parse_mesh(
     extras: &mut Vec<TriangleExtras>,
     scratch: &mut MeshScratch,
 ) -> Result<()> {
-    for primitive in mesh.primitives() {
-        if primitive.mode() != gltf::mesh::Mode::Triangles {
-            bail!("a mesh in the file uses non-triangle geometry");
+    fn push_triangle(
+        [i1, i2, i3]: [u32; 3],
+        triangles: &mut Vec<Triangle>,
+        extras: &mut Vec<TriangleExtras>,
+        scratch: &MeshScratch,
+        material_idx: u32,
+    ) {
+        let i1 = i1 as usize;
+        let i2 = i2 as usize;
+        let i3 = i3 as usize;
+
+        // check for malformed indices
+        if i1 >= scratch.positions.len()
+            || i2 >= scratch.positions.len()
+            || i3 >= scratch.positions.len()
+        {
+            return;
         }
 
+        triangles.push([
+            scratch.positions[i1],
+            scratch.positions[i2],
+            scratch.positions[i3],
+        ]);
+
+        extras.push([
+            VertexExtras::new(
+                scratch.uvs.get(i1).copied(),
+                scratch.colors.get(i1).copied(),
+                material_idx,
+            ),
+            VertexExtras::new(
+                scratch.uvs.get(i2).copied(),
+                scratch.colors.get(i2).copied(),
+                material_idx,
+            ),
+            VertexExtras::new(
+                scratch.uvs.get(i3).copied(),
+                scratch.colors.get(i3).copied(),
+                material_idx,
+            ),
+        ]);
+    }
+
+    for primitive in instance.mesh.primitives() {
         let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
         let material_idx = primitive.material().index().unwrap_or(materials.len()) as u32;
 
         let positions = reader
             .read_positions()
             .context("mesh has no positions")?
-            .map(|pos| transform.transform_point3(Vec3::from(pos)));
+            .map(|pos| instance.transform.transform_point3(Vec3::from(pos)));
 
         scratch.positions.clear();
         scratch.positions.reserve(positions.len());
@@ -210,44 +249,51 @@ fn parse_mesh(
         scratch.indices.clear();
         if let Some(indices) = reader.read_indices() {
             scratch.indices.extend(indices.into_u32());
+        } else {
+            scratch.indices.extend(0..scratch.positions.len() as u32);
         }
 
-        for chunk in scratch.indices.chunks_exact(3) {
-            let i1 = chunk[0] as usize;
-            let i2 = chunk[1] as usize;
-            let i3 = chunk[2] as usize;
+        match primitive.mode() {
+            gltf::mesh::Mode::Triangles => {
+                let (triangle_indices, _) = scratch.indices.as_chunks::<3>();
 
-            // check for malformed indices
-            if i1 >= scratch.positions.len()
-                || i2 >= scratch.positions.len()
-                || i3 >= scratch.positions.len()
-            {
-                continue;
+                for &triangle in triangle_indices {
+                    push_triangle(triangle, triangles, extras, scratch, material_idx);
+                }
             }
+            gltf::mesh::Mode::TriangleStrip => {
+                for (i, window) in scratch.indices.windows(3).enumerate() {
+                    let Ok([idx0, idx1, idx2]) = <[u32; 3]>::try_from(window) else {
+                        unreachable!()
+                    };
 
-            triangles.push([
-                scratch.positions[i1],
-                scratch.positions[i2],
-                scratch.positions[i3],
-            ]);
+                    // winding order flips every odd triangle
+                    if i.is_multiple_of(2) {
+                        push_triangle([idx0, idx1, idx2], triangles, extras, scratch, material_idx);
+                    } else {
+                        push_triangle([idx0, idx2, idx1], triangles, extras, scratch, material_idx);
+                    }
+                }
+            }
+            gltf::mesh::Mode::TriangleFan => {
+                if scratch.indices.len() >= 3 {
+                    let idx0 = scratch.indices[0];
 
-            extras.push([
-                VertexExtras::new(
-                    scratch.uvs.get(i1).copied(),
-                    scratch.colors.get(i1).copied(),
-                    material_idx,
-                ),
-                VertexExtras::new(
-                    scratch.uvs.get(i2).copied(),
-                    scratch.colors.get(i2).copied(),
-                    material_idx,
-                ),
-                VertexExtras::new(
-                    scratch.uvs.get(i3).copied(),
-                    scratch.colors.get(i3).copied(),
-                    material_idx,
-                ),
-            ]);
+                    for window in scratch.indices[1..].windows(2) {
+                        let Ok([idx1, idx2]) = <[u32; 2]>::try_from(window) else {
+                            unreachable!()
+                        };
+
+                        push_triangle([idx0, idx1, idx2], triangles, extras, scratch, material_idx);
+                    }
+                }
+            }
+            gltf::mesh::Mode::LineLoop | gltf::mesh::Mode::Lines | gltf::mesh::Mode::LineStrip => {
+                eprintln!("line primitives are not supported");
+            }
+            gltf::mesh::Mode::Points => {
+                eprintln!("point primitives are not supported");
+            }
         }
     }
 
@@ -257,9 +303,8 @@ fn parse_mesh(
 /// A multithreaded version of `gltf::import`. Outputs `RgbaImage` instead of `gltf::image::Data`.
 #[profiling::function]
 fn import_gltf(
-    path: &str,
+    path: &Path,
 ) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<Arc<RgbaImage>>)> {
-    let path = std::path::Path::new(path);
     let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
 
     let mut gltf = {
@@ -295,7 +340,7 @@ fn import_gltf(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
+pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
     let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
     let mut materials = document
@@ -336,9 +381,8 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
     let mut scratch = MeshScratch::default();
 
     for instance in instances {
-        if let Err(e) = parse_mesh(
-            &instance.mesh,
-            instance.transform,
+        if let Err(e) = parse_mesh_instance(
+            instance,
             &mut bounds,
             &materials,
             &buffers,

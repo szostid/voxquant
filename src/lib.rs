@@ -10,8 +10,9 @@
 use anyhow::{Context as _, Result, bail};
 use clap::Parser;
 use image::{Rgba, RgbaImage};
-use std::fmt::Display;
+use std::path::Path;
 use std::time::Instant;
+use std::{fmt::Display, path::PathBuf};
 
 mod gltf2;
 mod io;
@@ -41,9 +42,8 @@ impl Display for VoxelizationMode {
 }
 
 /// Returns the extension of the file at `path`
-fn get_extension(path: &str) -> Result<&str> {
-    std::path::Path::new(path)
-        .extension()
+fn get_extension(path: &Path) -> Result<&str> {
+    path.extension()
         .context("failed to verify the file extension")?
         .to_str()
         .context("failed to convert file extension to str")
@@ -59,7 +59,7 @@ impl InputType {
     /// # Errors
     /// Returns an error if the format is unsupported or if the file
     /// extension cannot be determined
-    pub fn from_file(file: &str) -> Result<Self> {
+    pub fn from_file(file: &Path) -> Result<Self> {
         let extension = get_extension(file)?;
 
         match extension {
@@ -79,7 +79,7 @@ impl OutputType {
     /// # Errors
     /// Returns an error if the format is unsupported or if the file
     /// extension cannot be determined
-    pub fn from_file(file: &str) -> Result<Self> {
+    pub fn from_file(file: &Path) -> Result<Self> {
         let extension = get_extension(file)?;
 
         match extension {
@@ -130,11 +130,11 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
 pub struct Args {
     /// The input file that will be voxelized
     #[arg(short, long)]
-    input: String,
+    input: PathBuf,
 
     /// The output file after voxelization
     #[arg(short, long)]
-    output: String,
+    output: PathBuf,
 
     /// The resolution of the output model
     #[arg(short, long, default_value_t = 1024)]

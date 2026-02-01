@@ -98,7 +98,7 @@ pub mod magica {
     clippy::default_trait_access,
     reason = "we don't have access to the AHashMap type"
 )]
-pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> Result<()> {
+pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &Path) -> Result<()> {
     use dot_vox::*;
 
     // the palette starts at index 1 and ends later because magicavoxel only allows for 255
