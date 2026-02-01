@@ -1,32 +1,7 @@
 use crate::*;
-use bytemuck::Pod;
-use bytemuck::Zeroable;
-use image::RgbaImage;
+use bytemuck::{Pod, Zeroable};
+use glam::Vec2;
 use std::sync::Arc;
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Zeroable, Pod)]
-pub struct Vertex {
-    pub position: Vec3,
-    pub color: [u8; 4],
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Zeroable, Pod)]
-pub struct FloatVertex {
-    pub position: Vec3,
-    pub color: [f32; 4],
-}
-
-impl From<Vertex> for FloatVertex {
-    fn from(value: Vertex) -> Self {
-        let color = value.color.map(|c| c as f32 / 255.0);
-        Self {
-            position: value.position,
-            color,
-        }
-    }
-}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
@@ -59,7 +34,7 @@ pub enum ImageOrColor {
         alpha_threshold: Option<u8>,
     },
     Color {
-        color: Color,
+        color: Rgba<u8>,
         alpha_threshold: Option<u8>,
     },
 }
@@ -82,7 +57,7 @@ pub mod magica {
     const B_STEPS: u16 = 6;
 
     /// Maps an RGBA color to a palette index (1-253).
-    /// Index 0 is reserved for 'Air' in MagicaVoxel, so we shift everything by +1.
+    /// Index 0 is reserved for 'Air' in `MagicaVoxel`, so we shift everything by +1.
     pub const fn encode_color(color: [u8; 4]) -> u8 {
         let r = color[0] as u16;
         let g = color[1] as u16;
@@ -119,6 +94,10 @@ pub mod magica {
 }
 
 #[profiling::function]
+#[expect(
+    clippy::default_trait_access,
+    reason = "we don't have access to the AHashMap type"
+)]
 pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> Result<()> {
     use dot_vox::*;
 
@@ -129,7 +108,7 @@ pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> R
 
     for index in 0..=255 {
         let color = magica::decode_color(index);
-        palette.push(dot_vox::Color {
+        palette.push(Color {
             r: color[0],
             g: color[1],
             b: color[2],
@@ -198,7 +177,7 @@ pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &str) -> R
     }
 
     // Construct the scene
-    let data = dot_vox::DotVoxData {
+    let data = DotVoxData {
         version: 150,
         models,
         palette,

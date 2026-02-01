@@ -20,5 +20,8 @@ anyhow = "1.0.100"
 rayon = "1.11.0"
 dot_vox = "5.1.1"
 
-tracy-client = "0.18"
-profiling = { version = "1.0.17", features = ["profile-with-tracy"] }
+tracy-client = { version = "0.18", optional = true }
+profiling = { version = "1.0.17" }
+
+[features]
+profiling = ["profiling/profile-with-tracy", "dep:tracy-client"]

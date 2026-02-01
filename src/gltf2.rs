@@ -1,9 +1,8 @@
-use std::sync::Arc;
-
-use crate::io::*;
 use crate::*;
-use image::RgbaImage;
+use glam::{Mat4, Vec2, Vec3};
+use io::{ImageOrColor, Mesh, VertexExtras};
 use rayon::prelude::*;
+use std::sync::Arc;
 
 struct MeshInstance<'a> {
     mesh: gltf::Mesh<'a>,
@@ -105,7 +104,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         .base_color_texture()
         .map(|texture_info| texture_info.texture())
     {
-        let image = parse_image(&image_data, image)
+        let image = parse_image(image_data, image)
             .context("failed to parse the color image used by the material")?;
 
         return Ok(ImageOrColor::Image {
@@ -118,7 +117,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         .emissive_texture()
         .map(|texture_info| texture_info.texture())
     {
-        let image = parse_image(&image_data, image)
+        let image = parse_image(image_data, image)
             .context("failed to parse the emissive image used by the material")?;
 
         return Ok(ImageOrColor::Image {
@@ -132,7 +131,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         .and_then(|spectral| spectral.diffuse_texture())
         .map(|texture_info| texture_info.texture())
     {
-        let image = parse_image(&image_data, image)
+        let image = parse_image(image_data, image)
             .context("failed to parse the spectral image used by the material")?;
 
         return Ok(ImageOrColor::Image {
@@ -143,7 +142,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
 
     let base_color = mat.pbr_metallic_roughness().base_color_factor();
 
-    let base_color = image::Rgba([
+    let base_color = Rgba([
         (base_color[0] * 255.0) as u8,
         (base_color[1] * 255.0) as u8,
         (base_color[2] * 255.0) as u8,
@@ -261,7 +260,7 @@ fn import_gltf(
     path: &str,
 ) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<Arc<RgbaImage>>)> {
     let path = std::path::Path::new(path);
-    let base = path.parent().unwrap_or(std::path::Path::new("."));
+    let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
 
     let mut gltf = {
         profiling::scope!("gltf::load_document");
@@ -307,7 +306,7 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
 
     // i.e. default material
     materials.push(ImageOrColor::Color {
-        color: image::Rgba([255, 255, 255, 255]),
+        color: Rgba([255, 255, 255, 255]),
         alpha_threshold: None,
     });
 
@@ -325,7 +324,7 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
                 .mesh
                 .primitives()
                 .filter(|p| p.mode() == gltf::mesh::Mode::Triangles)
-                .map(|p| p.indices().map(|a| a.count() / 3).unwrap_or(0))
+                .map(|p| p.indices().map_or(0, |a| a.count() / 3))
                 .sum::<usize>()
         })
         .sum();
@@ -347,14 +346,14 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
             &mut triangle_extras,
             &mut scratch,
         ) {
-            eprintln!("failed to parse mesh: {e}")
-        };
+            eprintln!("failed to parse mesh: {e}");
+        }
     }
 
     Ok(Mesh {
-        materials,
         triangles,
         triangle_extras,
+        materials,
         bounds,
     })
 }

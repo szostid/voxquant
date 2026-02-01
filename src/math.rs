@@ -1,5 +1,5 @@
 use crate::*;
-pub use glam::*;
+use glam::{Vec3, Vec4};
 
 pub type Triangle = [Vec3; 3];
 pub type TriangleExtras = [io::VertexExtras; 3];
@@ -31,14 +31,14 @@ impl BoundingBox {
 
 #[inline]
 #[must_use]
-pub fn interpolate_color(colors: [Color; 3], bary: Vec3) -> Color {
+pub fn interpolate_color(colors: [Rgba<u8>; 3], bary: Vec3) -> Rgba<u8> {
     let c0 = Vec4::from_array(colors[0].0.map(|c| c as f32));
     let c1 = Vec4::from_array(colors[1].0.map(|c| c as f32));
     let c2 = Vec4::from_array(colors[2].0.map(|c| c as f32));
 
     let final_color = c0 * bary.x + c1 * bary.y + c2 * bary.z;
 
-    image::Rgba([
+    Rgba([
         final_color.x as u8,
         final_color.y as u8,
         final_color.z as u8,
@@ -48,8 +48,8 @@ pub fn interpolate_color(colors: [Color; 3], bary: Vec3) -> Color {
 
 #[inline]
 #[must_use]
-pub fn multiply_colors(c1: Color, c2: Color) -> Color {
-    image::Rgba([
+pub fn multiply_colors(c1: Rgba<u8>, c2: Rgba<u8>) -> Rgba<u8> {
+    Rgba([
         ((c1[0] as u16 * c2[0] as u16) / 255) as u8,
         ((c1[1] as u16 * c2[1] as u16) / 255) as u8,
         ((c1[2] as u16 * c2[2] as u16) / 255) as u8,
@@ -58,7 +58,7 @@ pub fn multiply_colors(c1: Color, c2: Color) -> Color {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct TriangleData {
+pub struct TriangleInterpolator {
     /// `a`
     a: Vec3,
 
@@ -78,7 +78,7 @@ pub struct TriangleData {
     inv_det: f32,
 }
 
-impl TriangleData {
+impl TriangleInterpolator {
     pub fn new(tri: Triangle) -> Self {
         let v0 = tri[1] - tri[0];
         let v1 = tri[2] - tri[0];

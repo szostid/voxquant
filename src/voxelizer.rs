@@ -1,6 +1,7 @@
-use crate::io::{ImageOrColor, Mesh};
 use crate::*;
 use dot_vox::Voxel;
+use glam::{IVec3, U8Vec3, Vec2, Vec3};
+use io::{ImageOrColor, Mesh};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -11,14 +12,14 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(origin: IVec3) -> Self {
+    pub const fn new(origin: IVec3) -> Self {
         Self {
             voxels: Vec::new(),
             origin,
         }
     }
 
-    pub fn add_voxel(&mut self, position: IVec3, color: Option<Color>) {
+    pub fn add_voxel(&mut self, position: IVec3, color: Option<Rgba<u8>>) {
         let Some(color) = color else { return };
 
         let pos_in_chunk = position - self.origin;
@@ -58,6 +59,10 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, triangle: Triangle
 /// If the triangle is small, or string-like then this will instead fallback
 /// to wireframe voxelization.
 #[inline]
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "FMA doesn't lead to performance increases and it makes the function unreadable"
+)]
 fn voxelize_triangle(
     store: &mut Chunk,
     shading: &ColorData,
@@ -248,21 +253,21 @@ fn voxelize_points(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
 #[derive(Clone, Copy)]
 enum AlbedoData<'a> {
     Texture {
-        image: &'a image::RgbaImage,
+        image: &'a RgbaImage,
         uvs: [Vec2; 3],
     },
-    Flat(Color),
+    Flat(Rgba<u8>),
 }
 
 struct ColorData<'a> {
-    precalc: TriangleData,
-    vert_colors: [Color; 3],
+    precalc: math::TriangleInterpolator,
+    vert_colors: [Rgba<u8>; 3],
     albedo: AlbedoData<'a>,
     alpha_threshold: Option<u8>,
 }
 
 impl ColorData<'_> {
-    pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Color> {
+    pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Rgba<u8>> {
         bary = bary.max(Vec3::ZERO);
 
         let sum = bary.x + bary.y + bary.z;
@@ -270,7 +275,7 @@ impl ColorData<'_> {
             bary /= sum;
         }
 
-        let v_color = interpolate_color(self.vert_colors, bary);
+        let v_color = math::interpolate_color(self.vert_colors, bary);
 
         let base_color = match self.albedo {
             AlbedoData::Texture { image, uvs, .. } => {
@@ -287,7 +292,7 @@ impl ColorData<'_> {
             AlbedoData::Flat(base_color) => base_color,
         };
 
-        let color = multiply_colors(base_color, v_color);
+        let color = math::multiply_colors(base_color, v_color);
 
         if let Some(threshold) = self.alpha_threshold
             && color.0[3] < threshold
@@ -298,7 +303,7 @@ impl ColorData<'_> {
         Some(color)
     }
 
-    pub fn snap_and_get_color(&self, pos: IVec3) -> Option<Color> {
+    pub fn snap_and_get_color(&self, pos: IVec3) -> Option<Rgba<u8>> {
         let bary = self.precalc.get_closest_barycentric(pos.as_vec3());
 
         self.sample_from_bary(bary)
@@ -340,7 +345,7 @@ fn voxelize_chunk(
             .get(mat_id as usize)
             .unwrap_or(&mesh.materials[0]);
 
-        let vert_colors = extras.map(|extra| image::Rgba(extra.color));
+        let vert_colors = extras.map(|extra| Rgba(extra.color));
 
         let (albedo, alpha_threshold) = match material {
             ImageOrColor::Image {
@@ -358,7 +363,7 @@ fn voxelize_chunk(
         };
 
         let shading = ColorData {
-            precalc: TriangleData::new(vertices),
+            precalc: math::TriangleInterpolator::new(vertices),
             vert_colors,
             albedo,
             alpha_threshold,
@@ -366,7 +371,7 @@ fn voxelize_chunk(
 
         match mode {
             VoxelizationMode::Triangles => {
-                voxelize_triangle(&mut chunk, &shading, vertices, chunk_base)
+                voxelize_triangle(&mut chunk, &shading, vertices, chunk_base);
             }
             VoxelizationMode::Wireframe => voxelize_wireframe(&mut chunk, &shading, vertices),
             VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, vertices),
