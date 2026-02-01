@@ -1,6 +1,6 @@
 use crate::*;
 use glam::{Mat4, Vec2, Vec3};
-use io::{ImageOrColor, Mesh, VertexExtras};
+use io::{Material, Mesh, VertexExtras};
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -88,70 +88,86 @@ fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<
     Ok(Arc::clone(image))
 }
 
+impl From<gltf::texture::WrappingMode> for io::WrapMode {
+    fn from(value: gltf::texture::WrappingMode) -> Self {
+        match value {
+            gltf::texture::WrappingMode::ClampToEdge => Self::ClampToEdge,
+            gltf::texture::WrappingMode::MirroredRepeat => Self::MirroredRepeat,
+            gltf::texture::WrappingMode::Repeat => Self::Repeat,
+        }
+    }
+}
+
+fn get_material_texture_data(
+    mat: &gltf::Material,
+    image_data: &[Arc<RgbaImage>],
+) -> Result<Option<io::MaterialTexturing>> {
+    fn with_material_texture<R>(
+        mat: &gltf::Material,
+        f: impl FnOnce(gltf::texture::Info<'_>) -> R,
+    ) -> Option<R> {
+        if let Some(info) = mat.pbr_metallic_roughness().base_color_texture() {
+            return Some(f(info));
+        }
+
+        if let Some(info) = mat.emissive_texture() {
+            return Some(f(info));
+        }
+
+        if let Some(info) = mat
+            .pbr_specular_glossiness()
+            .and_then(|spectral| spectral.diffuse_texture())
+        {
+            return Some(f(info));
+        }
+
+        None
+    }
+
+    with_material_texture(mat, |texture_info| {
+        let texture_index = texture_info.texture().source().index();
+
+        let texture = image_data
+            .get(texture_index)
+            .context("failed to fetch image data (index is out of bounds)")?;
+
+        Ok(io::MaterialTexturing {
+            texture: Arc::clone(texture),
+            tex_coords: texture_info.tex_coord(),
+            wrap_mode: [
+                texture_info.texture().sampler().wrap_s().into(),
+                texture_info.texture().sampler().wrap_t().into(),
+            ],
+        })
+    })
+    .map_or(Ok(None), |f| f.map(Some))
+}
+
 #[profiling::function]
-fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result<ImageOrColor> {
+fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result<Material> {
     let alpha_threshold = match mat.alpha_mode() {
         gltf::material::AlphaMode::Opaque => None,
         gltf::material::AlphaMode::Mask => {
             let cutoff = mat.alpha_cutoff().unwrap_or(0.5);
             Some((cutoff * 255.0) as u8)
         }
-        gltf::material::AlphaMode::Blend => Some(128),
+        // we cannot handle transparency yet, so we do a very high alpha threshold.
+        // basically everything that's not opaque is not voxelized at all
+        gltf::material::AlphaMode::Blend => Some(255),
     };
 
-    if let Some(image) = mat
+    let base_color = mat
         .pbr_metallic_roughness()
-        .base_color_texture()
-        .map(|texture_info| texture_info.texture())
-    {
-        let image = parse_image(image_data, image)
-            .context("failed to parse the color image used by the material")?;
+        .base_color_factor()
+        .map(|r| (r * 255.0) as u8)
+        .into();
 
-        return Ok(ImageOrColor::Image {
-            image,
-            alpha_threshold,
-        });
-    }
+    let texturing = get_material_texture_data(mat, image_data)?;
 
-    if let Some(image) = mat
-        .emissive_texture()
-        .map(|texture_info| texture_info.texture())
-    {
-        let image = parse_image(image_data, image)
-            .context("failed to parse the emissive image used by the material")?;
-
-        return Ok(ImageOrColor::Image {
-            image,
-            alpha_threshold,
-        });
-    }
-
-    if let Some(image) = mat
-        .pbr_specular_glossiness()
-        .and_then(|spectral| spectral.diffuse_texture())
-        .map(|texture_info| texture_info.texture())
-    {
-        let image = parse_image(image_data, image)
-            .context("failed to parse the spectral image used by the material")?;
-
-        return Ok(ImageOrColor::Image {
-            image,
-            alpha_threshold,
-        });
-    }
-
-    let base_color = mat.pbr_metallic_roughness().base_color_factor();
-
-    let base_color = Rgba([
-        (base_color[0] * 255.0) as u8,
-        (base_color[1] * 255.0) as u8,
-        (base_color[2] * 255.0) as u8,
-        (base_color[3] * 255.0) as u8,
-    ]);
-
-    Ok(ImageOrColor::Color {
-        color: base_color,
+    Ok(Material {
+        texturing,
         alpha_threshold,
+        base_color,
     })
 }
 
@@ -167,7 +183,7 @@ struct MeshScratch {
 fn parse_mesh_instance(
     instance: MeshInstance,
     bounds: &mut BoundingBox,
-    materials: &[ImageOrColor],
+    materials: &[Material],
     buffers: &[gltf::buffer::Data],
     triangles: &mut Vec<Triangle>,
     extras: &mut Vec<TriangleExtras>,
@@ -219,7 +235,11 @@ fn parse_mesh_instance(
 
     for primitive in instance.mesh.primitives() {
         let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-        let material_idx = primitive.material().index().unwrap_or(materials.len()) as u32;
+        let material_idx = primitive.material().index().unwrap_or(materials.len() - 1);
+
+        let material = &materials[material_idx];
+
+        let material_tex_coord = material.texturing.as_ref().map_or(0, |tex| tex.tex_coords);
 
         let positions = reader
             .read_positions()
@@ -235,8 +255,10 @@ fn parse_mesh_instance(
         }
 
         scratch.uvs.clear();
-        if let Some(uv_iter) = reader.read_tex_coords(0) {
+        if let Some(uv_iter) = reader.read_tex_coords(material_tex_coord) {
             scratch.uvs.extend(uv_iter.into_f32().map(Vec2::from));
+        } else if material.texturing.is_some() {
+            eprintln!("material has an explicit `tex_coord` which doesn't exist");
         }
 
         scratch.colors.clear();
@@ -258,7 +280,7 @@ fn parse_mesh_instance(
                 let (triangle_indices, _) = scratch.indices.as_chunks::<3>();
 
                 for &triangle in triangle_indices {
-                    push_triangle(triangle, triangles, extras, scratch, material_idx);
+                    push_triangle(triangle, triangles, extras, scratch, material_idx as u32);
                 }
             }
             gltf::mesh::Mode::TriangleStrip => {
@@ -269,9 +291,21 @@ fn parse_mesh_instance(
 
                     // winding order flips every odd triangle
                     if i.is_multiple_of(2) {
-                        push_triangle([idx0, idx1, idx2], triangles, extras, scratch, material_idx);
+                        push_triangle(
+                            [idx0, idx1, idx2],
+                            triangles,
+                            extras,
+                            scratch,
+                            material_idx as u32,
+                        );
                     } else {
-                        push_triangle([idx0, idx2, idx1], triangles, extras, scratch, material_idx);
+                        push_triangle(
+                            [idx0, idx2, idx1],
+                            triangles,
+                            extras,
+                            scratch,
+                            material_idx as u32,
+                        );
                     }
                 }
             }
@@ -284,7 +318,13 @@ fn parse_mesh_instance(
                             unreachable!()
                         };
 
-                        push_triangle([idx0, idx1, idx2], triangles, extras, scratch, material_idx);
+                        push_triangle(
+                            [idx0, idx1, idx2],
+                            triangles,
+                            extras,
+                            scratch,
+                            material_idx as u32,
+                        );
                     }
                 }
             }
@@ -349,10 +389,11 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
         .collect::<Result<Vec<_>, _>>()
         .context("failed to parse materials")?;
 
-    // i.e. default material
-    materials.push(ImageOrColor::Color {
-        color: Rgba([255, 255, 255, 255]),
+    // default fallback material
+    materials.push(Material {
+        texturing: None,
         alpha_threshold: None,
+        base_color: Rgba([255, 255, 255, 255]),
     });
 
     let mut instances = Vec::new();

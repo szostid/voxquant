@@ -1,7 +1,7 @@
 use crate::*;
 use dot_vox::Voxel;
 use glam::{IVec3, U8Vec3, Vec2, Vec3};
-use io::{ImageOrColor, Mesh};
+use io::{Mesh, WrapMode};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -48,7 +48,7 @@ impl Chunk {
 
 /// Voxelizes the edges of the provided `triangle`.
 #[inline]
-fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
+fn voxelize_wireframe(store: &mut Chunk, shading: &TriangleData, triangle: Triangle) {
     voxelize_line(store, shading, triangle[0], triangle[1]);
     voxelize_line(store, shading, triangle[1], triangle[2]);
     voxelize_line(store, shading, triangle[0], triangle[2]);
@@ -65,7 +65,7 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, triangle: Triangle
 )]
 fn voxelize_triangle(
     store: &mut Chunk,
-    shading: &ColorData,
+    shading: &TriangleData,
     triangle: Triangle,
     chunk_origin: IVec3,
 ) {
@@ -198,7 +198,7 @@ fn voxelize_triangle(
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
 #[inline]
-fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
+fn voxelize_line(store: &mut Chunk, shading: &TriangleData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -242,7 +242,7 @@ fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
 
 /// Voxelizes the points of the provided `triangle`
 #[inline]
-fn voxelize_points(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
+fn voxelize_points(store: &mut Chunk, shading: &TriangleData, triangle: Triangle) {
     let [a, b, c] = triangle.map(|p| p.as_ivec3());
 
     store.add_voxel(a, shading.sample_from_bary(Vec3::X));
@@ -250,23 +250,21 @@ fn voxelize_points(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
     store.add_voxel(c, shading.sample_from_bary(Vec3::Z));
 }
 
-#[derive(Clone, Copy)]
-enum AlbedoData<'a> {
-    Texture {
-        image: &'a RgbaImage,
-        uvs: [Vec2; 3],
-    },
-    Flat(Rgba<u8>),
+struct TriangleTextureData<'a> {
+    pub texture: &'a RgbaImage,
+    pub uvs: [Vec2; 3],
+    pub wrap: [WrapMode; 2],
 }
 
-struct ColorData<'a> {
+struct TriangleData<'a> {
     precalc: math::TriangleInterpolator,
     vert_colors: [Rgba<u8>; 3],
-    albedo: AlbedoData<'a>,
+    base_color: Rgba<u8>,
+    texture: Option<TriangleTextureData<'a>>,
     alpha_threshold: Option<u8>,
 }
 
-impl ColorData<'_> {
+impl TriangleData<'_> {
     pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Rgba<u8>> {
         bary = bary.max(Vec3::ZERO);
 
@@ -275,24 +273,31 @@ impl ColorData<'_> {
             bary /= sum;
         }
 
-        let v_color = math::interpolate_color(self.vert_colors, bary);
+        let vertex_color = math::interpolate_color(self.vert_colors, bary);
 
-        let base_color = match self.albedo {
-            AlbedoData::Texture { image, uvs, .. } => {
+        let base_color = match self.texture {
+            Some(TriangleTextureData {
+                texture,
+                uvs,
+                wrap: [wrap_u, wrap_v],
+            }) => {
                 let mut uv = (uvs[0] * bary.x) + (uvs[1] * bary.y) + (uvs[2] * bary.z);
 
-                uv = uv.rem_euclid(Vec2::ONE);
+                uv.x = wrap_u.apply(uv.x);
+                uv.y = wrap_v.apply(uv.y);
 
-                let (w, h) = image.dimensions();
+                let (w, h) = texture.dimensions();
                 let x = (((w - 1) as f32) * uv.x) as u32;
                 let y = (((h - 1) as f32) * uv.y) as u32;
 
-                *image.get_pixel(x, y)
+                let tex_color = *texture.get_pixel(x, y);
+
+                math::multiply_colors(tex_color, self.base_color)
             }
-            AlbedoData::Flat(base_color) => base_color,
+            None => self.base_color,
         };
 
-        let color = math::multiply_colors(base_color, v_color);
+        let color = math::multiply_colors(base_color, vertex_color);
 
         if let Some(threshold) = self.alpha_threshold
             && color.0[3] < threshold
@@ -345,28 +350,18 @@ fn voxelize_chunk(
             .get(mat_id as usize)
             .unwrap_or(&mesh.materials[0]);
 
-        let vert_colors = extras.map(|extra| Rgba(extra.color));
+        let texture = material.texturing.as_ref().map(|data| TriangleTextureData {
+            texture: &data.texture,
+            uvs: extras.map(|e| e.uv().unwrap()),
+            wrap: data.wrap_mode,
+        });
 
-        let (albedo, alpha_threshold) = match material {
-            ImageOrColor::Image {
-                image,
-                alpha_threshold,
-            } => {
-                let uvs = extras.map(|extras| extras.uv().unwrap());
-
-                (AlbedoData::Texture { image, uvs }, *alpha_threshold)
-            }
-            ImageOrColor::Color {
-                color,
-                alpha_threshold,
-            } => (AlbedoData::Flat(*color), *alpha_threshold),
-        };
-
-        let shading = ColorData {
+        let shading = TriangleData {
+            texture,
             precalc: math::TriangleInterpolator::new(vertices),
-            vert_colors,
-            albedo,
-            alpha_threshold,
+            vert_colors: extras.map(|extra| Rgba(extra.color)),
+            base_color: material.base_color,
+            alpha_threshold: material.alpha_threshold,
         };
 
         match mode {
