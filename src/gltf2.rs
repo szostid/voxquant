@@ -91,23 +91,40 @@ fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<
 
 #[profiling::function]
 fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result<ImageOrColor> {
+    let alpha_threshold = match mat.alpha_mode() {
+        gltf::material::AlphaMode::Opaque => None,
+        gltf::material::AlphaMode::Mask => {
+            let cutoff = mat.alpha_cutoff().unwrap_or(0.5);
+            Some((cutoff * 255.0) as u8)
+        }
+        gltf::material::AlphaMode::Blend => Some(128),
+    };
+
     if let Some(image) = mat
         .pbr_metallic_roughness()
         .base_color_texture()
         .map(|texture_info| texture_info.texture())
     {
-        return parse_image(&image_data, image)
-            .context("failed to parse the color image used by the material")
-            .map(ImageOrColor::Image);
+        let image = parse_image(&image_data, image)
+            .context("failed to parse the color image used by the material")?;
+
+        return Ok(ImageOrColor::Image {
+            image,
+            alpha_threshold,
+        });
     }
 
     if let Some(image) = mat
         .emissive_texture()
         .map(|texture_info| texture_info.texture())
     {
-        return parse_image(&image_data, image)
-            .context("failed to parse the emissive image used by the material")
-            .map(ImageOrColor::Image);
+        let image = parse_image(&image_data, image)
+            .context("failed to parse the emissive image used by the material")?;
+
+        return Ok(ImageOrColor::Image {
+            image,
+            alpha_threshold,
+        });
     }
 
     if let Some(image) = mat
@@ -115,9 +132,13 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         .and_then(|spectral| spectral.diffuse_texture())
         .map(|texture_info| texture_info.texture())
     {
-        return parse_image(&image_data, image)
-            .context("failed to parse the color image of the spectral material")
-            .map(ImageOrColor::Image);
+        let image = parse_image(&image_data, image)
+            .context("failed to parse the spectral image used by the material")?;
+
+        return Ok(ImageOrColor::Image {
+            image,
+            alpha_threshold,
+        });
     }
 
     let base_color = mat.pbr_metallic_roughness().base_color_factor();
@@ -129,7 +150,10 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         (base_color[3] * 255.0) as u8,
     ]);
 
-    Ok(ImageOrColor::Color(base_color))
+    Ok(ImageOrColor::Color {
+        color: base_color,
+        alpha_threshold,
+    })
 }
 
 #[derive(Default)]
@@ -147,8 +171,8 @@ fn parse_mesh(
     bounds: &mut BoundingBox,
     materials: &[ImageOrColor],
     buffers: &[gltf::buffer::Data],
-    triangles: &mut Vec<[Vec3; 3]>,
-    extras: &mut Vec<[VertexExtras; 3]>,
+    triangles: &mut Vec<Triangle>,
+    extras: &mut Vec<TriangleExtras>,
     scratch: &mut MeshScratch,
 ) -> Result<()> {
     for primitive in mesh.primitives() {
@@ -282,7 +306,10 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
         .context("failed to parse materials")?;
 
     // i.e. default material
-    materials.push(ImageOrColor::Color(image::Rgba([255, 255, 255, 255])));
+    materials.push(ImageOrColor::Color {
+        color: image::Rgba([255, 255, 255, 255]),
+        alpha_threshold: None,
+    });
 
     let mut instances = Vec::new();
     for scene in document.scenes() {

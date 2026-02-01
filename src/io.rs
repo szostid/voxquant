@@ -54,14 +54,20 @@ impl VertexExtras {
 
 #[derive(Debug, Clone)]
 pub enum ImageOrColor {
-    Image(Arc<RgbaImage>),
-    Color(Color),
+    Image {
+        image: Arc<RgbaImage>,
+        alpha_threshold: Option<u8>,
+    },
+    Color {
+        color: Color,
+        alpha_threshold: Option<u8>,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct Mesh {
-    pub triangles: Vec<[Vec3; 3]>,
-    pub triangle_extras: Vec<[VertexExtras; 3]>,
+    pub triangles: Vec<Triangle>,
+    pub triangle_extras: Vec<TriangleExtras>,
     pub materials: Vec<ImageOrColor>,
 
     pub bounds: BoundingBox,

@@ -1,6 +1,9 @@
 use crate::*;
 pub use glam::*;
 
+pub type Triangle = [Vec3; 3];
+pub type TriangleExtras = [io::VertexExtras; 3];
+
 #[must_use]
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
@@ -76,7 +79,7 @@ pub struct TriangleData {
 }
 
 impl TriangleData {
-    pub fn new(tri: [Vec3; 3]) -> Self {
+    pub fn new(tri: Triangle) -> Self {
         let v0 = tri[1] - tri[0];
         let v1 = tri[2] - tri[0];
 

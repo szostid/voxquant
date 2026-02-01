@@ -8,13 +8,32 @@ mod voxelizer;
 
 use std::time::Instant;
 
-use clap::Parser;
-use voxelizer::{VoxelizationMode, voxelize};
-
 use anyhow::{Context as _, Result, bail};
+use clap::Parser;
 use math::*;
+use std::fmt::Display;
 
 type Color = image::Rgba<u8>;
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum VoxelizationMode {
+    #[value(name = "triangles")]
+    Triangles,
+    #[value(name = "wireframe")]
+    Wireframe,
+    #[value(name = "points")]
+    Points,
+}
+
+impl Display for VoxelizationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Triangles => f.write_str("triangles"),
+            Self::Wireframe => f.write_str("wireframe"),
+            Self::Points => f.write_str("points"),
+        }
+    }
+}
 
 enum InputType {
     GlbGltf,
@@ -63,7 +82,7 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
 
     println!("Mesh loaded in {}s", (t1 - t0).as_secs_f32());
 
-    let data = voxelize(&mesh, args.res, args.voxelization_mode);
+    let data = voxelizer::voxelize(&mesh, args.res, args.voxelization_mode);
 
     let t2 = Instant::now();
 

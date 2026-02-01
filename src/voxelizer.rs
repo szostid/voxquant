@@ -3,8 +3,8 @@ use crate::*;
 use dot_vox::Voxel;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::fmt::Display;
 
+/// 256x256x256 Chunk of a magicavoxel model
 pub struct Chunk {
     pub voxels: Vec<dot_vox::Voxel>,
     pub origin: IVec3,
@@ -18,7 +18,9 @@ impl Chunk {
         }
     }
 
-    pub fn add_voxel(&mut self, position: IVec3, value: Color) {
+    pub fn add_voxel(&mut self, position: IVec3, color: Option<Color>) {
+        let Some(color) = color else { return };
+
         let pos_in_chunk = position - self.origin;
 
         let Ok(pos_in_chunk) = U8Vec3::try_from(pos_in_chunk) else {
@@ -30,20 +32,25 @@ impl Chunk {
             x: pos_in_chunk.x,
             y: pos_in_chunk.z,
             z: pos_in_chunk.y,
-            i: crate::io::magica::encode_color(value.0),
+            i: crate::io::magica::encode_color(color.0),
         });
     }
 }
 
+/// Voxelizes the edges of the provided `triangle`.
 #[inline]
-fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, tri_pos: [Vec3; 3]) {
-    voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
-    voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
-    voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
+fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
+    voxelize_line(store, shading, triangle[0], triangle[1]);
+    voxelize_line(store, shading, triangle[1], triangle[2]);
+    voxelize_line(store, shading, triangle[0], triangle[2]);
 }
 
+/// Voxelizes the provided `triangle`.
+///
+/// If the triangle is small, or string-like then this will instead fallback
+/// to wireframe voxelization.
 #[inline]
-fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
+fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
     // TLDR: we voxelize the triangle by flattening it onto some plane
     // and then by iterating over points on that plane, unflattening
     // them back onto the triangle
@@ -73,7 +80,6 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
     // original triangle to determine the third (so-called depth) coordinate
     // of the point. then we can derive the original coordinates of the point
     // and append it to the store.
-
     let normal = shading.precalc.normal();
 
     let d_axis = normal.abs().max_position();
@@ -84,12 +90,12 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
     let normal_v = normal[v_axis];
     let normal_d_inv = 1.0 / normal[d_axis];
     // plane constant (plane is defined by `P dot N = D`)
-    let plane_d = normal.dot(tri[0]);
+    let plane_d = normal.dot(triangle[0]);
 
     // project A, B, C onto the axis
-    let a = Vec2::new(tri[0][u_axis], tri[0][v_axis]);
-    let b = Vec2::new(tri[1][u_axis], tri[1][v_axis]);
-    let c = Vec2::new(tri[2][u_axis], tri[2][v_axis]);
+    let a = Vec2::new(triangle[0][u_axis], triangle[0][v_axis]);
+    let b = Vec2::new(triangle[1][u_axis], triangle[1][v_axis]);
+    let c = Vec2::new(triangle[2][u_axis], triangle[2][v_axis]);
 
     let ab = b - a;
     let ac = c - a;
@@ -118,14 +124,15 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
         // much smaller than the area of the triangle (that is,
         // the triangle takes up very little of the space within
         // the bounding box)
+        //
+        // NOTE: no need to handle near-zero bbox_area because then
+        // `is_tiny` will be true and we will voxelize as wifeframe
+        // anyways
         let density = area.abs() / bbox_area as f32;
-        let is_string = density < 0.25;
+        let is_string = density < 0.05;
 
         if is_tiny || is_string {
-            voxelize_line(store, shading, tri[0], tri[1]);
-            voxelize_line(store, shading, tri[1], tri[2]);
-            voxelize_line(store, shading, tri[2], tri[0]);
-
+            voxelize_wireframe(store, shading, triangle);
             return;
         }
     }
@@ -155,7 +162,7 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
                 voxel_pos[d_axis] = depth.round() as i32;
 
                 let color = shading.sample_from_bary(Vec3::new(a_bary, b_bary, c_bary));
-                store.add_voxel(voxel_pos, color.into());
+                store.add_voxel(voxel_pos, color);
             }
         }
     }
@@ -190,12 +197,9 @@ fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
     let mut t_max = (next_pos - ray_pos) * inv_dir;
 
     loop {
-        let color = shading.get_color(map_pos);
+        let color = shading.snap_and_get_color(map_pos);
 
-        // alpha cutoff
-        if color.0[3] > 128 {
-            store.add_voxel(map_pos, color.into());
-        }
+        store.add_voxel(map_pos, color);
 
         if map_pos == end {
             break;
@@ -208,9 +212,10 @@ fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
     }
 }
 
+/// Voxelizes the points of the provided `triangle`
 #[inline]
-fn voxelize_points(store: &mut Chunk, shading: &ColorData, points: [Vec3; 3]) {
-    let [a, b, c] = points.map(|p| p.as_ivec3());
+fn voxelize_points(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
+    let [a, b, c] = triangle.map(|p| p.as_ivec3());
 
     store.add_voxel(a, shading.sample_from_bary(Vec3::X));
     store.add_voxel(b, shading.sample_from_bary(Vec3::Y));
@@ -230,18 +235,25 @@ struct ColorData<'a> {
     precalc: TriangleData,
     vert_colors: [Color; 3],
     albedo: AlbedoData<'a>,
+    alpha_threshold: Option<u8>,
 }
 
 impl ColorData<'_> {
-    pub fn sample_from_bary(&self, bary: Vec3) -> Color {
+    pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Color> {
+        bary = bary.max(Vec3::ZERO);
+
+        let sum = bary.x + bary.y + bary.z;
+        if sum > f32::EPSILON {
+            bary /= sum;
+        }
+
         let v_color = interpolate_color(self.vert_colors, bary);
 
         let base_color = match self.albedo {
             AlbedoData::Texture { image, uvs, .. } => {
                 let mut uv = (uvs[0] * bary.x) + (uvs[1] * bary.y) + (uvs[2] * bary.z);
 
-                uv.x = uv.x.rem_euclid(1.0);
-                uv.y = uv.y.rem_euclid(1.0);
+                uv = uv.rem_euclid(Vec2::ONE);
 
                 let (w, h) = image.dimensions();
                 let x = (((w - 1) as f32) * uv.x) as u32;
@@ -252,33 +264,21 @@ impl ColorData<'_> {
             AlbedoData::Flat(base_color) => base_color,
         };
 
-        multiply_colors(base_color, v_color)
+        let color = multiply_colors(base_color, v_color);
+
+        if let Some(threshold) = self.alpha_threshold
+            && color.0[3] < threshold
+        {
+            return None;
+        }
+
+        Some(color)
     }
 
-    pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
-        let bary = self.precalc.get_closest_barycentric(map_pos.as_vec3());
+    pub fn snap_and_get_color(&self, pos: IVec3) -> Option<Color> {
+        let bary = self.precalc.get_closest_barycentric(pos.as_vec3());
 
         self.sample_from_bary(bary)
-    }
-}
-
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum VoxelizationMode {
-    #[value(name = "triangles")]
-    Triangles,
-    #[value(name = "wireframe")]
-    Wireframe,
-    #[value(name = "points")]
-    Points,
-}
-
-impl Display for VoxelizationMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Triangles => f.write_str("triangles"),
-            Self::Wireframe => f.write_str("wireframe"),
-            Self::Points => f.write_str("points"),
-        }
     }
 }
 
@@ -296,7 +296,7 @@ fn voxelize_chunk(
 
     let mut chunk = Chunk::new(chunk_base);
 
-    // we estimate early rallocations by just guessing
+    // we optimize early reallocations by just guessing
     // that every triangle generates about 50 voxels
     chunk.voxels.reserve(chunk_tris.len() * 50);
 
@@ -318,19 +318,26 @@ fn voxelize_chunk(
 
         let vert_colors = extras.map(|extra| image::Rgba(extra.color));
 
-        let albedo = match material {
-            ImageOrColor::Image(image) => {
+        let (albedo, alpha_threshold) = match material {
+            ImageOrColor::Image {
+                image,
+                alpha_threshold,
+            } => {
                 let uvs = extras.map(|extras| extras.uv().unwrap());
 
-                AlbedoData::Texture { image, uvs }
+                (AlbedoData::Texture { image, uvs }, *alpha_threshold)
             }
-            ImageOrColor::Color(color) => AlbedoData::Flat(*color),
+            ImageOrColor::Color {
+                color,
+                alpha_threshold,
+            } => (AlbedoData::Flat(*color), *alpha_threshold),
         };
 
         let shading = ColorData {
             precalc: TriangleData::new(vertices),
             vert_colors,
             albedo,
+            alpha_threshold,
         };
 
         match mode {
@@ -373,6 +380,7 @@ fn group_triangles(mesh: &Mesh, size: u32) -> HashMap<IVec3, Vec<usize>> {
     chunks
 }
 
+/// The core algorythm that voxelizes the mesh.
 #[profiling::function]
 pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode) -> Vec<Chunk> {
     group_triangles(mesh, size)
