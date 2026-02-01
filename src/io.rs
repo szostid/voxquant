@@ -1,6 +1,8 @@
 use crate::*;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
+use image::RgbaImage;
+use std::sync::Arc;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
@@ -52,7 +54,7 @@ impl VertexExtras {
 
 #[derive(Debug, Clone)]
 pub enum ImageOrColor {
-    Image(image::RgbaImage),
+    Image(Arc<RgbaImage>),
     Color(Color),
 }
 

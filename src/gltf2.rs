@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use crate::io::*;
 use crate::*;
+use image::RgbaImage;
 use rayon::prelude::*;
 
 struct MeshInstance<'a> {
@@ -29,36 +32,32 @@ fn collect_instances<'a>(
 }
 
 #[profiling::function]
-fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
-    use bytemuck::{Pod, PodCastError};
+fn convert_image(data: gltf::image::Data) -> Result<Arc<RgbaImage>> {
+    use bytemuck::Pod;
     use gltf::image::Format;
     use image::Pixel;
     use image::buffer::ConvertBuffer;
     use image::{ImageBuffer, Luma, LumaA, Rgb, Rgba, RgbaImage};
-    use std::borrow::Cow;
 
     /// Given `data`, converts the image (assumed to have
     /// the pixel format `P`) into an Rgba8 image
-    fn convert_image<P: Pixel>(data: &gltf::image::Data) -> Result<RgbaImage>
+    fn convert_image<P: Pixel>(data: gltf::image::Data) -> Result<Arc<RgbaImage>>
     where
         P::Subpixel: Pod,
-        for<'a> ImageBuffer<P, Cow<'a, [P::Subpixel]>>: ConvertBuffer<RgbaImage>,
+        ImageBuffer<P, Vec<P::Subpixel>>: ConvertBuffer<RgbaImage>,
     {
-        fn convert_bytes<T: Pod>(bytes: &[u8]) -> Result<Cow<'_, [T]>> {
-            match bytemuck::try_cast_slice::<u8, T>(bytes) {
-                Ok(slice) => Ok(Cow::Borrowed(slice)),
-                Err(PodCastError::AlignmentMismatch) => {
-                    Ok(Cow::Owned(bytemuck::pod_collect_to_vec(bytes)))
-                }
-                Err(e) => Err(anyhow::anyhow!(e)),
+        fn convert_data<T: Pod>(data: Vec<u8>) -> Vec<T> {
+            match bytemuck::try_cast_vec::<u8, T>(data) {
+                Ok(data) => data,
+                Err((_, data)) => bytemuck::pod_collect_to_vec(&data),
             }
         }
 
-        let pixels = convert_bytes(&data.pixels).context("cannot convert texture contents")?;
+        let pixels = convert_data(data.pixels);
 
-        ImageBuffer::from_raw(data.width, data.height, pixels)
+        ImageBuffer::from_vec(data.width, data.height, pixels)
             .context("image has invalid dimensions")
-            .map(|img| img.convert())
+            .map(|img| Arc::new(img.convert()))
     }
 
     match data.format {
@@ -73,27 +72,25 @@ fn convert_image(data: &gltf::image::Data) -> Result<image::RgbaImage> {
         Format::R8 => convert_image::<Luma<u8>>(data),
         Format::R8G8 => convert_image::<LumaA<u8>>(data),
         Format::R8G8B8 => convert_image::<Rgb<u8>>(data),
-        Format::R8G8B8A8 => RgbaImage::from_raw(data.width, data.height, data.pixels.clone())
-            .context("image has invalid dimensions"),
+        Format::R8G8B8A8 => RgbaImage::from_vec(data.width, data.height, data.pixels)
+            .context("image has invalid dimensions")
+            .map(Arc::new),
     }
 }
 
 #[profiling::function]
-fn parse_image(
-    image_data: &[gltf::image::Data],
-    texture: gltf::Texture,
-) -> Result<image::RgbaImage> {
+fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<Arc<RgbaImage>> {
     let image_index = texture.source().index();
 
     let image = image_data
         .get(image_index)
         .context("failed to fetch image data (index is out of bounds)")?;
 
-    convert_image(image).context("failed to convert image")
+    Ok(Arc::clone(image))
 }
 
 #[profiling::function]
-fn parse_material(mat: &gltf::Material, image_data: &[gltf::image::Data]) -> Result<ImageOrColor> {
+fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result<ImageOrColor> {
     if let Some(image) = mat
         .pbr_metallic_roughness()
         .base_color_texture()
@@ -135,6 +132,14 @@ fn parse_material(mat: &gltf::Material, image_data: &[gltf::image::Data]) -> Res
     Ok(ImageOrColor::Color(base_color))
 }
 
+#[derive(Default)]
+struct MeshScratch {
+    positions: Vec<Vec3>,
+    uvs: Vec<Vec2>,
+    colors: Vec<[u8; 4]>,
+    indices: Vec<u32>,
+}
+
 #[profiling::function]
 fn parse_mesh(
     mesh: &gltf::Mesh,
@@ -144,91 +149,80 @@ fn parse_mesh(
     buffers: &[gltf::buffer::Data],
     triangles: &mut Vec<[Vec3; 3]>,
     extras: &mut Vec<[VertexExtras; 3]>,
+    scratch: &mut MeshScratch,
 ) -> Result<()> {
-    #[inline]
-    fn get_extras(
-        idx: usize,
-        uvs: Option<&[Vec2]>,
-        colors: Option<&[[u8; 4]]>,
-        material_idx: u32,
-    ) -> VertexExtras {
-        let uv = uvs.as_ref().and_then(|uvs| uvs.get(idx)).copied();
-        let color = colors.as_ref().and_then(|colors| colors.get(idx)).copied();
-        VertexExtras::new(uv, color, material_idx)
-    }
-
     for primitive in mesh.primitives() {
-        let mode = primitive.mode();
-
-        if mode != gltf::mesh::Mode::Triangles {
+        if primitive.mode() != gltf::mesh::Mode::Triangles {
             bail!("a mesh in the file uses non-triangle geometry");
         }
 
-        let material_idx = primitive.material().index().unwrap_or(materials.len());
+        let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+        let material_idx = primitive.material().index().unwrap_or(materials.len()) as u32;
 
-        let data = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-
-        let mut indices = data
-            .read_indices()
-            .context("a mesh in the file has no vertex indices")?
-            .into_u32();
-
-        let vert_coords = data
+        let positions = reader
             .read_positions()
-            .context("a mesh in the file has no vertex positions")?
-            .map(|v| transform.transform_point3(Vec3::from(v)))
-            .collect::<Vec<_>>();
+            .context("mesh has no positions")?
+            .map(|pos| transform.transform_point3(Vec3::from(pos)));
 
-        for &v in &vert_coords {
-            bounds.extend(v);
+        scratch.positions.clear();
+        scratch.positions.reserve(positions.len());
+
+        for pos in positions {
+            bounds.extend(pos);
+            scratch.positions.push(pos);
         }
 
-        let colors = data
-            .read_colors(0)
-            .map(|c| c.into_rgba_u8().collect::<Vec<_>>());
+        scratch.uvs.clear();
+        if let Some(uv_iter) = reader.read_tex_coords(0) {
+            scratch.uvs.extend(uv_iter.into_f32().map(Vec2::from));
+        }
 
-        let uvs = data
-            .read_tex_coords(0)
-            .map(|uvs| uvs.into_f32().map(Vec2::from).collect::<Vec<_>>());
+        scratch.colors.clear();
+        if let Some(color_iter) = reader.read_colors(0) {
+            let color_iter = color_iter.into_rgba_u8();
 
-        loop {
-            let i1 = indices.next();
-            let i2 = indices.next();
-            let i3 = indices.next();
+            scratch.colors.extend(color_iter);
+        }
 
-            if i1.is_none() {
-                break;
+        scratch.indices.clear();
+        if let Some(indices) = reader.read_indices() {
+            scratch.indices.extend(indices.into_u32());
+        }
+
+        for chunk in scratch.indices.chunks_exact(3) {
+            let i1 = chunk[0] as usize;
+            let i2 = chunk[1] as usize;
+            let i3 = chunk[2] as usize;
+
+            // check for malformed indices
+            if i1 >= scratch.positions.len()
+                || i2 >= scratch.positions.len()
+                || i3 >= scratch.positions.len()
+            {
+                continue;
             }
 
-            let (Some(i1), Some(i2), Some(i3)) = (i1, i2, i3) else {
-                eprintln!("found a non-full triangle ({i1:?}, {i2:?}, {i3:?})");
-                break;
-            };
-
             triangles.push([
-                vert_coords[i1 as usize],
-                vert_coords[i2 as usize],
-                vert_coords[i3 as usize],
+                scratch.positions[i1],
+                scratch.positions[i2],
+                scratch.positions[i3],
             ]);
 
             extras.push([
-                get_extras(
-                    i1 as usize,
-                    uvs.as_deref(),
-                    colors.as_deref(),
-                    material_idx as u32,
+                VertexExtras::new(
+                    scratch.uvs.get(i1).copied(),
+                    scratch.colors.get(i1).copied(),
+                    material_idx,
                 ),
-                get_extras(
-                    i2 as usize,
-                    uvs.as_deref(),
-                    colors.as_deref(),
-                    material_idx as u32,
+                VertexExtras::new(
+                    scratch.uvs.get(i2).copied(),
+                    scratch.colors.get(i2).copied(),
+                    material_idx,
                 ),
-                get_extras(
-                    i3 as usize,
-                    uvs.as_deref(),
-                    colors.as_deref(),
-                    material_idx as u32,
+                VertexExtras::new(
+                    scratch.uvs.get(i3).copied(),
+                    scratch.colors.get(i3).copied(),
+                    material_idx,
                 ),
             ]);
         }
@@ -237,17 +231,52 @@ fn parse_mesh(
     Ok(())
 }
 
+/// A multithreaded version of `gltf::import`. Outputs `RgbaImage` instead of `gltf::image::Data`.
+#[profiling::function]
+fn import_gltf(
+    path: &str,
+) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<Arc<RgbaImage>>)> {
+    let path = std::path::Path::new(path);
+    let base = path.parent().unwrap_or(std::path::Path::new("."));
+
+    let mut gltf = {
+        profiling::scope!("gltf::load_document");
+
+        let file = std::fs::File::open(path).context("failed to open file")?;
+        let reader = std::io::BufReader::new(file);
+        gltf::Gltf::from_reader(reader).context("failed to parse gltf")?
+    };
+
+    let buffers = {
+        profiling::scope!("gltf::import_buffers");
+
+        gltf::import_buffers(&gltf.document, Some(base), gltf.blob.take())
+            .context("failed to read buffers")?
+    };
+
+    let images = gltf
+        .images()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|image| {
+            profiling::scope!("gltf::load_image");
+
+            let texture_data = gltf::image::Data::from_source(image.source(), Some(base), &buffers)
+                .context("failed to read texture")?;
+
+            convert_image(texture_data)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok((gltf.document, buffers, images))
+}
+
 #[profiling::function]
 pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
-    let (document, buffers, images) = {
-        profiling::scope!("gltf::import");
-        gltf::import(path).context("failed to load the gltf file")
-    }?;
+    let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
     let mut materials = document
         .materials()
-        .collect::<Vec<_>>()
-        .par_iter()
         .map(|material| parse_material(&material, &images))
         .collect::<Result<Vec<_>, _>>()
         .context("failed to parse materials")?;
@@ -262,20 +291,23 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
         }
     }
 
-    let total_triangles: usize = document
-        .meshes()
-        .flat_map(|m| m.primitives())
-        .filter(|p| p.mode() == gltf::mesh::Mode::Triangles)
-        .map(|p| {
-            p.indices()
-                .map(|accessor| accessor.count() / 3)
-                .unwrap_or(0)
+    let total_triangles: usize = instances
+        .iter()
+        .map(|instance| {
+            instance
+                .mesh
+                .primitives()
+                .filter(|p| p.mode() == gltf::mesh::Mode::Triangles)
+                .map(|p| p.indices().map(|a| a.count() / 3).unwrap_or(0))
+                .sum::<usize>()
         })
         .sum();
 
     let mut triangles = Vec::with_capacity(total_triangles);
     let mut triangle_extras = Vec::with_capacity(total_triangles);
     let mut bounds = BoundingBox::zero();
+
+    let mut scratch = MeshScratch::default();
 
     for instance in instances {
         if let Err(e) = parse_mesh(
@@ -286,6 +318,7 @@ pub fn load_gltf(path: &str, scale: f32) -> Result<Mesh> {
             &buffers,
             &mut triangles,
             &mut triangle_extras,
+            &mut scratch,
         ) {
             eprintln!("failed to parse mesh: {e}")
         };

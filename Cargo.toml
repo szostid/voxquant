@@ -7,7 +7,7 @@ keywords = ["glTF", "3D", "Voxel", "magicavoxel", "dotvox", "cli"]
 description = "A program to convert triangle meshes to voxels."
 
 [dependencies]
-image = { version = "0.25.1", default-features = false, features = ["rayon"] }
+image = { version = "0.25.1", default-features = false }
 gltf = { version = "1.4.1", default-features = false, features = [
     "import",
     "utils",

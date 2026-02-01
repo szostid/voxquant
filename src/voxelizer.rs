@@ -94,7 +94,7 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
     let area = ab.perp_dot(ac);
     let area_inv = 1.0 / area;
 
-    if area < f32::EPSILON {
+    if area.abs() < f32::EPSILON {
         return;
     }
 
