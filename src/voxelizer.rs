@@ -57,6 +57,12 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
     // we project the points onto that plane, creating a new 2D triangle
     // made up of the points `a, b, c`.
     //
+    // if that triangle is very small, or very string-like, then the DDA
+    // loop will likely produce incomplete results (because of aliasing,
+    // similar to fences in some antialiasing implementations) because it
+    // will miss too many voxels. in that case, we just voxelize the edges
+    // of the triangles as lines and skip the normal voxelization loop.
+    //
     // the rest of the algorythm consists of finding the bounds of this
     // 2D triangle and iterating over their bounding box. for every
     // picked point we find its barycentric coordinates and determine
@@ -100,6 +106,29 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
 
     let min = a.min(b).min(c).floor().as_ivec2();
     let max = a.max(b).max(c).ceil().as_ivec2();
+
+    {
+        let bbox_size = max - min;
+        let bbox_area = bbox_size.x * bbox_size.y;
+
+        let is_tiny = bbox_size.x <= 2 || bbox_size.y <= 2;
+
+        // we consider the triangle to be a thin string whenever
+        // the area of the triangle within the bounding box is
+        // much smaller than the area of the triangle (that is,
+        // the triangle takes up very little of the space within
+        // the bounding box)
+        let density = area.abs() / bbox_area as f32;
+        let is_string = density < 0.25;
+
+        if is_tiny || is_string {
+            voxelize_line(store, shading, tri[0], tri[1]);
+            voxelize_line(store, shading, tri[1], tri[2]);
+            voxelize_line(store, shading, tri[2], tri[0]);
+
+            return;
+        }
+    }
 
     for u in min.x..=max.x {
         for v in min.y..=max.y {
