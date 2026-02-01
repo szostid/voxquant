@@ -50,7 +50,12 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, triangle: Triangle
 /// If the triangle is small, or string-like then this will instead fallback
 /// to wireframe voxelization.
 #[inline]
-fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, triangle: Triangle) {
+fn voxelize_triangle(
+    store: &mut Chunk,
+    shading: &ColorData,
+    triangle: Triangle,
+    chunk_origin: IVec3,
+) {
     // TLDR: we voxelize the triangle by flattening it onto some plane
     // and then by iterating over points on that plane, unflattening
     // them back onto the triangle
@@ -137,8 +142,18 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, triangle: Triangle)
         }
     }
 
-    for u in min.x..=max.x {
-        for v in min.y..=max.y {
+    let chunk_u_min = chunk_origin[u_axis];
+    let chunk_u_max = chunk_u_min + 255;
+    let chunk_v_min = chunk_origin[v_axis];
+    let chunk_v_max = chunk_v_min + 255;
+
+    let u_start = min.x.max(chunk_u_min);
+    let u_end = max.x.min(chunk_u_max);
+    let v_start = min.y.max(chunk_v_min);
+    let v_end = max.y.min(chunk_v_max);
+
+    for u in u_start..=u_end {
+        for v in v_start..=v_end {
             let p = Vec2::new(u as f32 + 0.5, v as f32 + 0.5);
             let ap = p - a;
 
@@ -341,7 +356,9 @@ fn voxelize_chunk(
         };
 
         match mode {
-            VoxelizationMode::Triangles => voxelize_triangle(&mut chunk, &shading, vertices),
+            VoxelizationMode::Triangles => {
+                voxelize_triangle(&mut chunk, &shading, vertices, chunk_base)
+            }
             VoxelizationMode::Wireframe => voxelize_wireframe(&mut chunk, &shading, vertices),
             VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, vertices),
         }
