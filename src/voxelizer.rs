@@ -40,28 +40,88 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, tri_pos: [Vec3; 3]
     voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
 }
 
-fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri_pos: [Vec3; 3]) {
-    const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
+fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
+    // TLDR: we voxelize the triangle by flattening it onto some plane
+    // and then by iterating over points on that plane, unflattening
+    // them back onto the triangle
+    //
+    // Detailed description:
+    //
+    // we pick the plane as the axis-aligned plane on which the
+    // triangle will take up the most area. the axis of the normal
+    // of that plane is called `d` here. the two other axes are `u, v`
+    //
+    // we project the points onto that plane, creating a new 2D triangle
+    // made up of the points `a, b, c`.
+    //
+    // the rest of the algorythm consists of finding the bounds of this
+    // 2D triangle and iterating over their bounding box. for every
+    // picked point we find its barycentric coordinates and determine
+    // if it is within the triangle.
+    //
+    // if a picked point lies within the triangle, we need to solve the
+    // equation for a point that would lie on the plane defined by the
+    // original triangle to determine the third (so-called depth) coordinate
+    // of the point. then we can derive the original coordinates of the point
+    // and append it to the store.
 
-    // find the longest side and the indices of the two vectors it connects
-    let (a, b, ab) = LINES
-        .map(|(a, b)| (a, b, tri_pos[a].distance_squared(tri_pos[b])))
-        .into_iter()
-        .max_by(|(_, _, l1), (_, _, l2)| l1.total_cmp(l2))
-        .map(|(a, b, ab)| (a, b, ab.sqrt()))
-        .unwrap();
+    let normal = shading.precalc.normal();
 
-    let c = 3 - a - b;
+    let d_axis = normal.abs().max_position();
+    let u_axis = (d_axis + 1) % 3;
+    let v_axis = (d_axis + 2) % 3;
 
-    // ab is the longest line, c is the point that doesn't lay on it
-    // we want to cast a bunch of lines from the point c onto the longest line ab
+    let normal_u = normal[u_axis];
+    let normal_v = normal[v_axis];
+    let normal_d_inv = 1.0 / normal[d_axis];
+    // plane constant (plane is defined by `P dot N = D`)
+    let plane_d = normal.dot(tri[0]);
 
-    let num_steps = (ab.ceil() as i32).max(1);
-    let dir = (tri_pos[b] - tri_pos[a]) / num_steps as f32;
+    // project A, B, C onto the axis
+    let a = Vec2::new(tri[0][u_axis], tri[0][v_axis]);
+    let b = Vec2::new(tri[1][u_axis], tri[1][v_axis]);
+    let c = Vec2::new(tri[2][u_axis], tri[2][v_axis]);
 
-    for i in 0..=num_steps {
-        let start = tri_pos[a] + dir * i as f32;
-        voxelize_line(store, shading, start, tri_pos[c]);
+    let ab = b - a;
+    let ac = c - a;
+
+    // note: area of a triangle would technically be 1/2 * (AB x AC)
+    // but since we're using the ratios anyways, the 1/2 would cancel
+    // out (perp_dot is the cross product)
+    let area = ab.perp_dot(ac);
+    let area_inv = 1.0 / area;
+
+    let min = a.min(b).min(c).floor().as_ivec2();
+    let max = a.max(b).max(c).ceil().as_ivec2();
+
+    for u in min.x..=max.x {
+        for v in min.y..=max.y {
+            let p = Vec2::new(u as f32 + 0.5, v as f32 + 0.5);
+            let ap = p - a;
+
+            let c_bary = ab.perp_dot(ap) * area_inv;
+            let b_bary = ap.perp_dot(ac) * area_inv;
+            let a_bary = 1.0 - c_bary - b_bary;
+
+            if a_bary >= 0.0 && b_bary >= 0.0 && c_bary >= 0.0 {
+                // we need to find the depth. we solve the equation of the plane defined by the
+                // triangle to find the `d` (third/z) coordinate of a point `P` that lies on it:
+                // N dot P = D
+                // N.u * u + N.v * v + N.d * d = D
+                // N.d * d = D - N.u * u - N.v * v
+                // d = (D - N.u * u - N.v * v) / N.d
+                // note that `plane_d` is the plane constant `D` from the equation above
+                let depth = (plane_d - normal_u * p.x - normal_v * p.y) * normal_d_inv;
+
+                let mut voxel_pos = IVec3::ZERO;
+                voxel_pos[u_axis] = u;
+                voxel_pos[v_axis] = v;
+                voxel_pos[d_axis] = depth.round() as i32;
+
+                let color = shading.sample_from_bary(Vec3::new(a_bary, b_bary, c_bary));
+                store.add_voxel(voxel_pos, color.into());
+            }
+        }
     }
 }
 
@@ -111,9 +171,12 @@ fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
     }
 }
 
-fn voxelize_point(store: &mut Chunk, point: Vec3) {
-    let point = point.round().as_ivec3();
-    store.add_voxel(point, image::Rgba([32, 32, 32, 255]));
+fn voxelize_points(store: &mut Chunk, shading: &ColorData, points: [Vec3; 3]) {
+    let [a, b, c] = points.map(|p| p.as_ivec3());
+
+    store.add_voxel(a, shading.sample_from_bary(Vec3::X));
+    store.add_voxel(b, shading.sample_from_bary(Vec3::Y));
+    store.add_voxel(c, shading.sample_from_bary(Vec3::Z));
 }
 
 #[derive(Clone, Copy)]
@@ -132,9 +195,7 @@ struct ColorData<'a> {
 }
 
 impl ColorData<'_> {
-    pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
-        let bary = self.precalc.get_closest_barycentric(map_pos.as_vec3());
-
+    pub fn sample_from_bary(&self, bary: Vec3) -> Color {
         let v_color = interpolate_color(self.vert_colors, bary);
 
         let base_color = match self.albedo {
@@ -154,6 +215,12 @@ impl ColorData<'_> {
         };
 
         multiply_colors(base_color, v_color)
+    }
+
+    pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
+        let bary = self.precalc.get_closest_barycentric(map_pos.as_vec3());
+
+        self.sample_from_bary(bary)
     }
 }
 
@@ -214,17 +281,9 @@ fn voxelize_chunk(
         };
 
         match mode {
-            VoxelizationMode::Triangles => {
-                voxelize_triangle(&mut chunk, &shading, vertices);
-            }
-            VoxelizationMode::Lines => {
-                voxelize_wireframe(&mut chunk, &shading, vertices);
-            }
-            VoxelizationMode::Points => {
-                for point in vertices {
-                    voxelize_point(&mut chunk, point);
-                }
-            }
+            VoxelizationMode::Triangles => voxelize_triangle(&mut chunk, &shading, vertices),
+            VoxelizationMode::Lines => voxelize_wireframe(&mut chunk, &shading, vertices),
+            VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, vertices),
         }
     }
 

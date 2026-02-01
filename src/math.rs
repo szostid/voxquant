@@ -105,6 +105,12 @@ impl TriangleData {
 
     #[inline]
     #[must_use]
+    pub fn normal(&self) -> Vec3 {
+        self.v0.cross(self.v1)
+    }
+
+    #[inline]
+    #[must_use]
     pub fn get_closest_barycentric(&self, p: Vec3) -> Vec3 {
         let v2 = p - self.a;
 
