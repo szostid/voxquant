@@ -82,7 +82,7 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
 
     println!("Mesh loaded in {}s", (t1 - t0).as_secs_f32());
 
-    let data = voxelizer::voxelize(&mesh, args.res, args.voxelization_mode);
+    let data = voxelizer::voxelize(&mesh, args.res, args.voxelization_mode, args.optimize);
 
     let t2 = Instant::now();
 
@@ -133,6 +133,13 @@ struct Args {
     /// instead.
     #[arg(long, default_value_t = VoxelizationMode::Triangles)]
     voxelization_mode: VoxelizationMode,
+
+    /// Whether to deduplicate voxels. Without this options,
+    /// if two triangles share a voxel, both voxels will be
+    /// present in the output file (magicavoxel will likely
+    /// present the last one)
+    #[arg(long, default_value_t = true)]
+    optimize: bool,
 }
 
 fn main() -> Result<()> {

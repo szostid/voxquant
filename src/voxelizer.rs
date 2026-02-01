@@ -35,6 +35,14 @@ impl Chunk {
             i: crate::io::magica::encode_color(color.0),
         });
     }
+
+    #[profiling::function]
+    pub fn optimize(&mut self) {
+        self.voxels
+            .sort_unstable_by_key(|v| u32::from_be_bytes([0, v.z, v.y, v.x]));
+
+        self.voxels.dedup_by_key(|v| (v.x, v.y, v.z));
+    }
 }
 
 /// Voxelizes the edges of the provided `triangle`.
@@ -304,6 +312,7 @@ fn voxelize_chunk(
     chunk_tris: &[usize],
     chunk_base: IVec3,
     mode: VoxelizationMode,
+    optimize: bool,
 ) -> Chunk {
     let largest_dim = mesh.bounds.size().max_element();
 
@@ -364,6 +373,10 @@ fn voxelize_chunk(
         }
     }
 
+    if optimize {
+        chunk.optimize();
+    }
+
     chunk
 }
 
@@ -399,9 +412,9 @@ fn group_triangles(mesh: &Mesh, size: u32) -> HashMap<IVec3, Vec<usize>> {
 
 /// The core algorythm that voxelizes the mesh.
 #[profiling::function]
-pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode) -> Vec<Chunk> {
+pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode, optimize: bool) -> Vec<Chunk> {
     group_triangles(mesh, size)
         .into_par_iter()
-        .map(|(chunk_idx, tris)| voxelize_chunk(mesh, size, &tris, chunk_idx * 256, mode))
+        .map(|(chunk_idx, tris)| voxelize_chunk(mesh, size, &tris, chunk_idx * 256, mode, optimize))
         .collect()
 }
