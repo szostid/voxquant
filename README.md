@@ -3,7 +3,9 @@ A Command line ultility to convert triangle meshes into voxels.
 
 The utility supports loading `.gltf`/`.glb` files and saving `.vox` files.
 
-The loading of the gltf files is partially multithreaded. Unformtunately, I do not think multithreading the voxelization (which is usually the longest step) is viable.
+Both `.gltf` loading and voxelization are parallelized. The vast majority of `gltf2` features are supported[1]. The output palette is static for now (dynamic generation is planned though).
+
+[1] Missing features: skinning, morph targets, texture transforms 
 
 ## CLI Usage
 Usage: `mesh_to_vox [OPTIONS] --input <INPUT> --output <OUTPUT>`

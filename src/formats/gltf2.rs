@@ -1,7 +1,7 @@
 use crate::*;
 use glam::{Mat4, Vec2, Vec3};
-use io::{Material, Mesh, VertexExtras};
 use rayon::prelude::*;
+use scene::{Material, MaterialTexturing, Mesh, VertexExtras, WrapMode};
 use std::sync::Arc;
 
 struct MeshInstance<'a> {
@@ -88,7 +88,7 @@ fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<
     Ok(Arc::clone(image))
 }
 
-impl From<gltf::texture::WrappingMode> for io::WrapMode {
+impl From<gltf::texture::WrappingMode> for WrapMode {
     fn from(value: gltf::texture::WrappingMode) -> Self {
         match value {
             gltf::texture::WrappingMode::ClampToEdge => Self::ClampToEdge,
@@ -101,7 +101,7 @@ impl From<gltf::texture::WrappingMode> for io::WrapMode {
 fn get_material_texture_data(
     mat: &gltf::Material,
     image_data: &[Arc<RgbaImage>],
-) -> Result<Option<io::MaterialTexturing>> {
+) -> Result<Option<MaterialTexturing>> {
     fn with_material_texture<R>(
         mat: &gltf::Material,
         f: impl FnOnce(gltf::texture::Info<'_>) -> R,
@@ -131,7 +131,7 @@ fn get_material_texture_data(
             .get(texture_index)
             .context("failed to fetch image data (index is out of bounds)")?;
 
-        Ok(io::MaterialTexturing {
+        Ok(MaterialTexturing {
             texture: Arc::clone(texture),
             tex_coords: texture_info.tex_coord(),
             wrap_mode: [

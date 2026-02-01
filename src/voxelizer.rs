@@ -1,8 +1,8 @@
 use crate::*;
 use dot_vox::Voxel;
 use glam::{IVec3, U8Vec3, Vec2, Vec3};
-use io::{Mesh, WrapMode};
 use rayon::prelude::*;
+use scene::{Mesh, WrapMode};
 use std::collections::HashMap;
 
 /// 256x256x256 Chunk of a magicavoxel model
@@ -33,7 +33,7 @@ impl Chunk {
             x: pos_in_chunk.x,
             y: pos_in_chunk.z,
             z: pos_in_chunk.y,
-            i: crate::io::magica::encode_color(color.0),
+            i: crate::formats::vox::encode_color(color.0),
         });
     }
 
@@ -257,7 +257,7 @@ struct TriangleTextureData<'a> {
 }
 
 struct TriangleData<'a> {
-    precalc: math::TriangleInterpolator,
+    precalc: geometry::TriangleInterpolator,
     vert_colors: [Rgba<u8>; 3],
     base_color: Rgba<u8>,
     texture: Option<TriangleTextureData<'a>>,
@@ -358,7 +358,7 @@ fn voxelize_chunk(
 
         let shading = TriangleData {
             texture,
-            precalc: math::TriangleInterpolator::new(vertices),
+            precalc: geometry::TriangleInterpolator::new(vertices),
             vert_colors: extras.map(|extra| Rgba(extra.color)),
             base_color: material.base_color,
             alpha_threshold: material.alpha_threshold,

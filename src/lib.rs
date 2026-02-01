@@ -14,12 +14,13 @@ use std::path::Path;
 use std::time::Instant;
 use std::{fmt::Display, path::PathBuf};
 
-mod gltf2;
-mod io;
+mod formats;
+mod geometry;
+mod math;
+mod scene;
 mod voxelizer;
 
-mod math;
-use math::{BoundingBox, Triangle, TriangleExtras};
+use geometry::{BoundingBox, Triangle, TriangleExtras};
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum VoxelizationMode {
@@ -98,7 +99,7 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
     let t0 = Instant::now();
 
     let mesh = match input_type {
-        InputType::GlbGltf => gltf2::load_gltf(&args.input, args.base_scale)
+        InputType::GlbGltf => formats::gltf2::load_gltf(&args.input, args.base_scale)
             .context("failed to load the input file")?,
     };
 
@@ -123,7 +124,7 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
 
             let center_offset = -(voxel_bounds_size / 2.0).round().as_ivec3() + 128;
 
-            io::save_as_magica_voxel(data, &args.output, center_offset)?;
+            formats::vox::save_vox(data, &args.output, center_offset)?;
         }
     }
 
