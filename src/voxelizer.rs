@@ -3,6 +3,7 @@ use crate::*;
 use dot_vox::Voxel;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::fmt::Display;
 
 pub struct Chunk {
     pub voxels: Vec<dot_vox::Voxel>,
@@ -34,12 +35,14 @@ impl Chunk {
     }
 }
 
+#[inline]
 fn voxelize_wireframe(store: &mut Chunk, shading: &ColorData, tri_pos: [Vec3; 3]) {
     voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
     voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
     voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
 }
 
+#[inline]
 fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
     // TLDR: we voxelize the triangle by flattening it onto some plane
     // and then by iterating over points on that plane, unflattening
@@ -91,6 +94,10 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
     let area = ab.perp_dot(ac);
     let area_inv = 1.0 / area;
 
+    if area < f32::EPSILON {
+        return;
+    }
+
     let min = a.min(b).min(c).floor().as_ivec2();
     let max = a.max(b).max(c).ceil().as_ivec2();
 
@@ -99,8 +106,8 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
             let p = Vec2::new(u as f32 + 0.5, v as f32 + 0.5);
             let ap = p - a;
 
-            let c_bary = ab.perp_dot(ap) * area_inv;
-            let b_bary = ap.perp_dot(ac) * area_inv;
+            let c_bary = ab.perp_dot(ap) * area_inv; // area of APB / area of ABC
+            let b_bary = ap.perp_dot(ac) * area_inv; // area of APC / area of ABC
             let a_bary = 1.0 - c_bary - b_bary;
 
             if a_bary >= 0.0 && b_bary >= 0.0 && c_bary >= 0.0 {
@@ -126,6 +133,7 @@ fn voxelize_triangle(store: &mut Chunk, shading: &ColorData, tri: [Vec3; 3]) {
 }
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
+#[inline]
 fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
@@ -171,6 +179,7 @@ fn voxelize_line(store: &mut Chunk, shading: &ColorData, p1: Vec3, p2: Vec3) {
     }
 }
 
+#[inline]
 fn voxelize_points(store: &mut Chunk, shading: &ColorData, points: [Vec3; 3]) {
     let [a, b, c] = points.map(|p| p.as_ivec3());
 
@@ -224,11 +233,24 @@ impl ColorData<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum VoxelizationMode {
+    #[value(name = "triangles")]
     Triangles,
-    Lines,
+    #[value(name = "wireframe")]
+    Wireframe,
+    #[value(name = "points")]
     Points,
+}
+
+impl Display for VoxelizationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Triangles => f.write_str("triangles"),
+            Self::Wireframe => f.write_str("wireframe"),
+            Self::Points => f.write_str("points"),
+        }
+    }
 }
 
 #[profiling::function]
@@ -245,13 +267,15 @@ fn voxelize_chunk(
 
     let mut chunk = Chunk::new(chunk_base);
 
+    // we estimate early rallocations by just guessing
+    // that every triangle generates about 50 voxels
+    chunk.voxels.reserve(chunk_tris.len() * 50);
+
     for &tri in chunk_tris {
         // we have to translate every vertex into a position relative to
         // the bounds of the storage, and then scaled to fit as well as
         // possible
-        let vertices = mesh.triangles[tri]
-            .map(|vertex| vertex - mesh.bounds.min)
-            .map(|vertex| vertex * scale);
+        let vertices = mesh.triangles[tri].map(|vertex| (vertex - mesh.bounds.min) * scale);
 
         let extras = mesh.triangle_extras[tri];
 
@@ -282,7 +306,7 @@ fn voxelize_chunk(
 
         match mode {
             VoxelizationMode::Triangles => voxelize_triangle(&mut chunk, &shading, vertices),
-            VoxelizationMode::Lines => voxelize_wireframe(&mut chunk, &shading, vertices),
+            VoxelizationMode::Wireframe => voxelize_wireframe(&mut chunk, &shading, vertices),
             VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, vertices),
         }
     }

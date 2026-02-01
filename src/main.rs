@@ -63,7 +63,7 @@ fn voxelize_mesh(args: &Args) -> Result<()> {
 
     println!("Mesh loaded in {}s", (t1 - t0).as_secs_f32());
 
-    let data = voxelize(&mesh, args.res, VoxelizationMode::Triangles);
+    let data = voxelize(&mesh, args.res, args.voxelization_mode);
 
     let t2 = Instant::now();
 
@@ -102,12 +102,18 @@ struct Args {
     output: String,
 
     /// The resolution of the output model
-    #[arg(long, default_value_t = 1024)]
+    #[arg(short, long, default_value_t = 1024)]
     res: u32,
 
-    /// The resolution of the output model
+    /// The scale of the output model
     #[arg(long, default_value_t = 1.0)]
     base_scale: f32,
+
+    /// The mode of voxelization. Defaults to triangles,
+    /// but you can voxelize the wireframe or vertices
+    /// instead.
+    #[arg(long, default_value_t = VoxelizationMode::Triangles)]
+    voxelization_mode: VoxelizationMode,
 }
 
 fn main() -> Result<()> {
