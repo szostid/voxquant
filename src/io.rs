@@ -1,6 +1,6 @@
 use crate::*;
 use bytemuck::{Pod, Zeroable};
-use glam::Vec2;
+use glam::{IVec3, Vec2};
 use std::sync::Arc;
 
 #[repr(C)]
@@ -119,7 +119,11 @@ pub mod magica {
     clippy::default_trait_access,
     reason = "we don't have access to the AHashMap type"
 )]
-pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &Path) -> Result<()> {
+pub fn save_as_magica_voxel(
+    chunks: Vec<voxelizer::Chunk>,
+    file_path: &Path,
+    shift: IVec3,
+) -> Result<()> {
     use dot_vox::*;
 
     // the palette starts at index 1 and ends later because magicavoxel only allows for 255
@@ -169,12 +173,14 @@ pub fn save_as_magica_voxel(chunks: Vec<voxelizer::Chunk>, file_path: &Path) -> 
         let transform_index = nodes.len() as u32;
         let shape_index = transform_index + 1;
 
+        let origin = chunk.origin + shift;
+
         nodes.push(SceneNode::Transform {
             attributes: Default::default(),
             frames: vec![Frame {
                 attributes: [(
                     "_t".to_string(),
-                    format!("{} {} {}", chunk.origin.x, chunk.origin.z, chunk.origin.y),
+                    format!("{} {} {}", origin.x, origin.z, origin.y),
                 )]
                 .into(),
             }],

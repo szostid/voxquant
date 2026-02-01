@@ -79,6 +79,7 @@ pub struct TriangleInterpolator {
 }
 
 impl TriangleInterpolator {
+    #[expect(clippy::suspicious_operation_groupings, reason = "???")]
     pub fn new(tri: Triangle) -> Self {
         let v0 = tri[1] - tri[0];
         let v1 = tri[2] - tri[0];

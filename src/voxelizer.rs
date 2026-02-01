@@ -39,8 +39,10 @@ impl Chunk {
 
     #[profiling::function]
     pub fn optimize(&mut self) {
+        // i've found that sorting by the material index to ensure that during deduplication
+        // we prefer brighter colors over dark colors makes everything look much nicer
         self.voxels
-            .sort_unstable_by_key(|v| u32::from_be_bytes([0, v.z, v.y, v.x]));
+            .sort_unstable_by_key(|v| u32::from_be_bytes([v.z, v.y, v.x, 255 - v.i]));
 
         self.voxels.dedup_by_key(|v| (v.x, v.y, v.z));
     }
@@ -59,10 +61,8 @@ fn voxelize_wireframe(store: &mut Chunk, shading: &TriangleData, triangle: Trian
 /// If the triangle is small, or string-like then this will instead fallback
 /// to wireframe voxelization.
 #[inline]
-#[expect(
-    clippy::suboptimal_flops,
-    reason = "FMA doesn't lead to performance increases and it makes the function unreadable"
-)]
+#[expect(clippy::similar_names, reason = "`u` vs `v` is quite clear")]
+#[expect(clippy::suboptimal_flops, reason = "FMA makes the function unreadable")]
 fn voxelize_triangle(
     store: &mut Chunk,
     shading: &TriangleData,

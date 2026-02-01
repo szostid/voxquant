@@ -114,7 +114,16 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
 
     match output_type {
         OutputType::MagicaVoxel => {
-            io::save_as_magica_voxel(data, &args.output)?;
+            // we offset the chunks bu the half the model size + 128 to ensure
+            // that the model is centered on the magicavoxel stage
+            let largest_dim = mesh.bounds.size().max_element();
+            let scale = args.res as f32 / largest_dim;
+
+            let voxel_bounds_size = mesh.bounds.size() * scale;
+
+            let center_offset = -(voxel_bounds_size / 2.0).round().as_ivec3() + 128;
+
+            io::save_as_magica_voxel(data, &args.output, center_offset)?;
         }
     }
 

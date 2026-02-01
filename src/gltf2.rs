@@ -153,7 +153,10 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         }
         // we cannot handle transparency yet, so we do a very high alpha threshold.
         // basically everything that's not opaque is not voxelized at all
-        gltf::material::AlphaMode::Blend => Some(255),
+        //
+        // NOTE: don't use 255 here, i've found that (i guess due to precision issues?)
+        // some stuff can become a swiss cheese with too high of a threashold
+        gltf::material::AlphaMode::Blend => Some(250),
     };
 
     let base_color = mat
