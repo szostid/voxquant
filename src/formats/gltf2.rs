@@ -1,9 +1,10 @@
 use crate::*;
-use geometry::{Triangle, Vertex};
+use geometry::{BoundingBox, Triangle, Vertex};
+use scene::{Material, MaterialTexturing, Scene, WrapMode};
+
 use glam::{Mat4, Vec2, Vec3};
-use rayon::prelude::*;
-use scene::{Material, MaterialTexturing, Mesh, WrapMode};
-use std::{f32::consts::FRAC_PI_2, sync::Arc};
+use std::f32::consts::FRAC_PI_2;
+use std::sync::Arc;
 
 struct MeshInstance<'a> {
     mesh: gltf::Mesh<'a>,
@@ -326,6 +327,8 @@ fn parse_mesh_instance(
 fn import_gltf(
     path: &Path,
 ) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<Arc<RgbaImage>>)> {
+    use rayon::prelude::*;
+
     let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
 
     let mut gltf = {
@@ -361,7 +364,7 @@ fn import_gltf(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
+pub fn load_gltf(path: &Path, scale: f32) -> Result<Scene> {
     let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
     let mut materials = document
@@ -417,7 +420,7 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
         }
     }
 
-    Ok(Mesh {
+    Ok(Scene {
         triangles,
         materials,
         bounds,

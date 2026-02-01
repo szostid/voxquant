@@ -1,6 +1,7 @@
 use crate::*;
-use std::sync::Arc;
+use geometry::{BoundingBox, Triangle};
 
+use std::sync::Arc;
 
 pub struct Material {
     pub texturing: Option<MaterialTexturing>,
@@ -36,7 +37,7 @@ pub struct MaterialTexturing {
     pub wrap_mode: [WrapMode; 2],
 }
 
-pub struct Mesh {
+pub struct Scene {
     pub triangles: Vec<Triangle>,
     pub materials: Vec<Material>,
     pub bounds: BoundingBox,

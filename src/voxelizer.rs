@@ -1,96 +1,17 @@
 use crate::*;
-use glam::{IVec3, U8Vec3, Vec2, Vec3};
-use rayon::prelude::*;
-use scene::{Mesh, WrapMode};
-use std::collections::HashMap;
+use geometry::Triangle;
+use scene::{Scene, WrapMode};
 
-pub trait VoxelType {
-    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self;
-    fn pos(&self) -> U8Vec3;
-}
+use glam::{IVec3, Vec2, Vec3, Vec4};
+use std::ops::Range;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct VoxelWithColor {
-    pub pos: U8Vec3,
-    pub color: Rgba<u8>,
-}
-
-impl VoxelType for VoxelWithColor {
-    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
-        Self { pos, color }
-    }
-
-    fn pos(&self) -> U8Vec3 {
-        self.pos
-    }
-}
-
-impl VoxelType for dot_vox::Voxel {
-    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
-        Self {
-            x: pos.x,
-            y: pos.y,
-            z: pos.z,
-            i: formats::vox::encode_color(color.0),
-        }
-    }
-
-    fn pos(&self) -> U8Vec3 {
-        U8Vec3 {
-            x: self.x,
-            y: self.y,
-            z: self.z,
-        }
-    }
-}
-
-/// 256x256x256 Chunk of a magicavoxel model
-#[derive(Clone)]
-pub struct Chunk<T: VoxelType> {
-    pub voxels: Vec<T>,
-    pub origin: IVec3,
-}
-
-impl<T: VoxelType> Chunk<T> {
-    pub const fn new(origin: IVec3) -> Self {
-        Self {
-            voxels: Vec::new(),
-            origin,
-        }
-    }
-
-    pub fn add_voxel(&mut self, position: IVec3, color: Option<Rgba<u8>>) {
-        let Some(color) = color else { return };
-
-        let pos_in_chunk = position - self.origin;
-
-        let Ok(pos_in_chunk) = U8Vec3::try_from(pos_in_chunk) else {
-            return;
-        };
-
-        self.voxels.push(T::from_pos_color(pos_in_chunk, color));
-    }
-
-    #[profiling::function]
-    pub fn optimize(&mut self) {
-        // i've found that sorting by the material index to ensure that during deduplication
-        // we prefer brighter colors over dark colors makes everything look much nicer
-        self.voxels.sort_unstable_by_key(|v| {
-            let pos = v.pos();
-            u32::from_be_bytes([0, pos.z, pos.y, pos.x])
-        });
-
-        self.voxels.dedup_by_key(|v| v.pos());
-    }
+pub trait VoxelStore {
+    fn add_voxel(&mut self, pos: IVec3, color: Rgba<u8>);
 }
 
 /// Voxelizes the edges of the provided `triangle`.
 #[inline]
-fn voxelize_wireframe<T: VoxelType>(
-    store: &mut Chunk<T>,
-    shading: &TriangleData,
-    triangle: Triangle,
-) {
+fn voxelize_wireframe<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangle: Triangle) {
     voxelize_line(store, shading, triangle[0], triangle[1]);
     voxelize_line(store, shading, triangle[1], triangle[2]);
     voxelize_line(store, shading, triangle[0], triangle[2]);
@@ -103,11 +24,11 @@ fn voxelize_wireframe<T: VoxelType>(
 #[inline]
 #[expect(clippy::similar_names, reason = "`u` vs `v` is quite clear")]
 #[expect(clippy::suboptimal_flops, reason = "FMA makes the function unreadable")]
-fn voxelize_triangle<T: VoxelType>(
-    store: &mut Chunk<T>,
+fn voxelize_triangle<T: VoxelStore>(
+    store: &mut T,
     shading: &TriangleData,
     triangle: Triangle,
-    chunk_origin: IVec3,
+    range: Range<IVec3>,
 ) {
     // TLDR: we voxelize the triangle by flattening it onto some plane
     // and then by iterating over points on that plane, unflattening
@@ -195,15 +116,10 @@ fn voxelize_triangle<T: VoxelType>(
         }
     }
 
-    let chunk_u_min = chunk_origin[u_axis];
-    let chunk_u_max = chunk_u_min + 255;
-    let chunk_v_min = chunk_origin[v_axis];
-    let chunk_v_max = chunk_v_min + 255;
-
-    let u_start = min.x.max(chunk_u_min);
-    let u_end = max.x.min(chunk_u_max);
-    let v_start = min.y.max(chunk_v_min);
-    let v_end = max.y.min(chunk_v_max);
+    let u_start = min.x.max(range.start[u_axis]);
+    let u_end = max.x.min(range.end[u_axis]);
+    let v_start = min.y.max(range.start[v_axis]);
+    let v_end = max.y.min(range.end[v_axis]);
 
     for u in u_start..=u_end {
         for v in v_start..=v_end {
@@ -230,7 +146,10 @@ fn voxelize_triangle<T: VoxelType>(
                 voxel_pos[d_axis] = depth.round() as i32;
 
                 let color = shading.sample_from_bary(Vec3::new(a_bary, b_bary, c_bary));
-                store.add_voxel(voxel_pos, color);
+
+                if let Some(color) = color {
+                    store.add_voxel(voxel_pos, color);
+                }
             }
         }
     }
@@ -238,7 +157,7 @@ fn voxelize_triangle<T: VoxelType>(
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
 #[inline]
-fn voxelize_line<T: VoxelType>(store: &mut Chunk<T>, shading: &TriangleData, p1: Vec3, p2: Vec3) {
+fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -254,40 +173,76 @@ fn voxelize_line<T: VoxelType>(store: &mut Chunk<T>, shading: &TriangleData, p1:
 
     let inv_dir = Vec3::ONE / ray_dir;
 
-    let mut map_pos = ray_pos.floor().as_ivec3();
+    let mut voxel_pos = ray_pos.floor().as_ivec3();
 
     let t_delta = inv_dir.abs();
     let step = ray_dir.signum().as_ivec3();
 
     let step_clamped = step.max(IVec3::ZERO);
-    let next_pos = (map_pos + step_clamped).as_vec3();
+    let next_pos = (voxel_pos + step_clamped).as_vec3();
 
     let mut t_max = (next_pos - ray_pos) * inv_dir;
 
     loop {
-        let color = shading.snap_and_get_color(map_pos);
+        let color = shading.snap_and_get_color(voxel_pos);
 
-        store.add_voxel(map_pos, color);
+        if let Some(color) = color {
+            store.add_voxel(voxel_pos, color);
+        }
 
-        if map_pos == end {
+        if voxel_pos == end {
             break;
         }
 
         let smallest = t_max.min_position();
 
         t_max[smallest] += t_delta[smallest];
-        map_pos[smallest] += step[smallest];
+        voxel_pos[smallest] += step[smallest];
     }
 }
 
 /// Voxelizes the points of the provided `triangle`
 #[inline]
-fn voxelize_points<T: VoxelType>(store: &mut Chunk<T>, shading: &TriangleData, triangle: Triangle) {
+fn voxelize_points<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangle: Triangle) {
     let [a, b, c] = triangle.vertices.map(|p| p.pos.as_ivec3());
 
-    store.add_voxel(a, shading.sample_from_bary(Vec3::X));
-    store.add_voxel(b, shading.sample_from_bary(Vec3::Y));
-    store.add_voxel(c, shading.sample_from_bary(Vec3::Z));
+    if let Some(color) = shading.sample_from_bary(Vec3::X) {
+        store.add_voxel(a, color)
+    }
+    if let Some(color) = shading.sample_from_bary(Vec3::Y) {
+        store.add_voxel(b, color)
+    }
+    if let Some(color) = shading.sample_from_bary(Vec3::Z) {
+        store.add_voxel(c, color)
+    }
+}
+
+#[inline]
+#[must_use]
+fn interpolate_color(colors: [Rgba<u8>; 3], bary: Vec3) -> Rgba<u8> {
+    let c0 = Vec4::from_array(colors[0].0.map(|c| c as f32));
+    let c1 = Vec4::from_array(colors[1].0.map(|c| c as f32));
+    let c2 = Vec4::from_array(colors[2].0.map(|c| c as f32));
+
+    let final_color = c0 * bary.x + c1 * bary.y + c2 * bary.z;
+
+    Rgba([
+        final_color.x as u8,
+        final_color.y as u8,
+        final_color.z as u8,
+        final_color.w as u8,
+    ])
+}
+
+#[inline]
+#[must_use]
+fn multiply_colors(c1: Rgba<u8>, c2: Rgba<u8>) -> Rgba<u8> {
+    Rgba([
+        ((c1[0] as u16 * c2[0] as u16) / 255) as u8,
+        ((c1[1] as u16 * c2[1] as u16) / 255) as u8,
+        ((c1[2] as u16 * c2[2] as u16) / 255) as u8,
+        ((c1[3] as u16 * c2[3] as u16) / 255) as u8,
+    ])
 }
 
 struct TriangleTextureData<'a> {
@@ -313,7 +268,7 @@ impl TriangleData<'_> {
             bary /= sum;
         }
 
-        let vertex_color = math::interpolate_color(self.vert_colors, bary);
+        let vertex_color = interpolate_color(self.vert_colors, bary);
 
         let base_color = match self.texture {
             Some(TriangleTextureData {
@@ -332,12 +287,12 @@ impl TriangleData<'_> {
 
                 let tex_color = *texture.get_pixel(x, y);
 
-                math::multiply_colors(tex_color, self.base_color)
+                multiply_colors(tex_color, self.base_color)
             }
             None => self.base_color,
         };
 
-        let color = math::multiply_colors(base_color, vertex_color);
+        let color = multiply_colors(base_color, vertex_color);
 
         if let Some(threshold) = self.alpha_threshold
             && color.0[3] < threshold
@@ -355,41 +310,53 @@ impl TriangleData<'_> {
     }
 }
 
-#[profiling::function]
-fn voxelize_chunk<T: VoxelType>(
-    mesh: &Mesh,
-    size: u32,
-    chunk_tris: &[usize],
-    chunk_base: IVec3,
-    mode: VoxelizationMode,
-    optimize: bool,
-) -> Chunk<T> {
-    let largest_dim = mesh.bounds.size().max_element();
+pub struct SceneSlice<'a> {
+    pub mesh: &'a Scene,
+    pub range: Range<IVec3>,
+    pub indices: Option<&'a [usize]>,
+}
 
+impl<'a> SceneSlice<'a> {
+    pub fn for_each_triangle(&self, mut op: impl FnMut(Triangle)) {
+        match self.indices {
+            Some(indices) => {
+                for &idx in indices {
+                    // Direct indexing branch
+                    op(self.mesh.triangles[idx]);
+                }
+            }
+            None => {
+                for &tri in &self.mesh.triangles {
+                    // Contiguous slice branch
+                    op(tri);
+                }
+            }
+        }
+    }
+}
+
+#[profiling::function]
+pub fn voxelize_scene<T: VoxelStore>(
+    store: &mut T,
+    input: SceneSlice,
+    mode: VoxelizationMode,
+    size: u32,
+) {
+    let largest_dim = input.mesh.bounds.size().max_element();
     let scale = size as f32 / largest_dim;
 
-    let mut chunk = Chunk::new(chunk_base);
-
-    // we optimize early reallocations by just guessing
-    // that every triangle generates about 50 voxels
-    chunk.voxels.reserve(chunk_tris.len() * 50);
-
-    for &tri in chunk_tris {
-        // we have to translate every vertex into a position relative to
-        // the bounds of the storage, and then scaled to fit as well as
-        // possible
-        let mut triangle = mesh.triangles[tri];
-
+    input.for_each_triangle(|mut triangle| {
         for vertex in &mut triangle.vertices {
-            vertex.pos = (vertex.pos - mesh.bounds.min) * scale;
+            vertex.pos = (vertex.pos - input.mesh.bounds.min) * scale;
         }
 
         let mat_id = triangle.material_index;
 
-        let material = mesh
+        let material = input
+            .mesh
             .materials
             .get(mat_id as usize)
-            .unwrap_or(&mesh.materials[0]);
+            .unwrap_or(&input.mesh.materials[0]);
 
         let texture = material.texturing.as_ref().map(|data| TriangleTextureData {
             texture: &data.texture,
@@ -407,61 +374,10 @@ fn voxelize_chunk<T: VoxelType>(
 
         match mode {
             VoxelizationMode::Triangles => {
-                voxelize_triangle(&mut chunk, &shading, triangle, chunk_base);
+                voxelize_triangle(store, &shading, triangle, input.range.clone());
             }
-            VoxelizationMode::Wireframe => voxelize_wireframe(&mut chunk, &shading, triangle),
-            VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, triangle),
+            VoxelizationMode::Wireframe => voxelize_wireframe(store, &shading, triangle),
+            VoxelizationMode::Points => voxelize_points(store, &shading, triangle),
         }
-    }
-
-    if optimize {
-        chunk.optimize();
-    }
-
-    chunk
-}
-
-#[profiling::function]
-fn group_triangles(mesh: &Mesh, size: u32) -> HashMap<IVec3, Vec<usize>> {
-    let mut chunks = HashMap::<IVec3, Vec<usize>>::new();
-
-    let largest_dim = mesh.bounds.size().max_element();
-    let scale = size as f32 / largest_dim;
-
-    for (idx, tri) in mesh.triangles.iter().enumerate() {
-        let [a, b, c] = tri
-            .vertices
-            .map(|vertex| vertex.pos - mesh.bounds.min)
-            .map(|vertex| vertex * scale);
-
-        let min = a.min(b).min(c);
-        let max = a.max(b).max(c);
-
-        let min_chunk = (min / 256.0).floor().as_ivec3();
-        let max_chunk = (max / 256.0).floor().as_ivec3();
-
-        for z in min_chunk.z..=max_chunk.z {
-            for y in min_chunk.y..=max_chunk.y {
-                for x in min_chunk.x..=max_chunk.x {
-                    chunks.entry(IVec3::new(x, y, z)).or_default().push(idx);
-                }
-            }
-        }
-    }
-
-    chunks
-}
-
-/// The core algorythm that voxelizes the mesh.
-#[profiling::function]
-pub fn voxelize<T: VoxelType + Send>(
-    mesh: &Mesh,
-    size: u32,
-    mode: VoxelizationMode,
-    optimize: bool,
-) -> Vec<Chunk<T>> {
-    group_triangles(mesh, size)
-        .into_par_iter()
-        .map(|(chunk_idx, tris)| voxelize_chunk(mesh, size, &tris, chunk_idx * 256, mode, optimize))
-        .collect()
+    });
 }

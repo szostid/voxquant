@@ -16,11 +16,8 @@ use std::time::Instant;
 
 mod formats;
 mod geometry;
-mod math;
 mod scene;
 mod voxelizer;
-
-use geometry::{BoundingBox, Triangle};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum VoxelizationMode {
@@ -107,7 +104,7 @@ impl OutputType {
     }
 }
 
-pub fn voxelize_mesh(args: &Args) -> Result<()> {
+pub fn voxelize(args: &Args) -> Result<()> {
     let input_type =
         InputType::from_file(&args.input).context("failed to infer input file type")?;
     let output_type =
@@ -115,39 +112,18 @@ pub fn voxelize_mesh(args: &Args) -> Result<()> {
 
     let t0 = Instant::now();
 
-    let mesh = match input_type {
+    let scene = match input_type {
         InputType::GlbGltf => formats::gltf2::load_gltf(&args.input, args.base_scale)
             .context("failed to load the input file")?,
     };
 
     let t1 = Instant::now();
 
-    println!("Mesh loaded in {}s", (t1 - t0).as_secs_f32());
-
-    let data = voxelizer::voxelize(&mesh, args.res, args.mode, !args.no_optimization);
-
-    let t2 = Instant::now();
-
-    println!("Mesh voxelized in {}s", (t2 - t1).as_secs_f32());
+    println!("Scene loaded in {}s", (t1 - t0).as_secs_f32());
 
     match output_type {
-        OutputType::MagicaVoxel => {
-            // we offset the chunks bu the half the model size + 128 to ensure
-            // that the model is centered on the magicavoxel stage
-            let largest_dim = mesh.bounds.size().max_element();
-            let scale = args.res as f32 / largest_dim;
-
-            let voxel_bounds_size = mesh.bounds.size() * scale;
-
-            let center_offset = -(voxel_bounds_size / 2.0).round().as_ivec3() + 128;
-
-            formats::vox::save_vox_dynamic(data, &args.output, center_offset)?;
-        }
+        OutputType::MagicaVoxel => formats::magicavoxel::voxelize_and_save(scene, args)?,
     }
-
-    let t3 = Instant::now();
-
-    println!("Mesh saved in {}s", (t3 - t2).as_secs_f32());
 
     Ok(())
 }

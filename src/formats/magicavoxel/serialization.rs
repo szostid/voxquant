@@ -1,9 +1,43 @@
 use crate::*;
-use dot_vox::Model;
-use glam::IVec3;
-use quantette::{ImageRef, PaletteSize, Pipeline, QuantizeMethod, deps::palette::rgb::Rgb};
-use rayon::prelude::*;
-use voxelizer::Chunk;
+
+use super::voxelization::{Chunk, VoxelType};
+
+use glam::{IVec3, U8Vec3};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct VoxelWithColor {
+    pub pos: U8Vec3,
+    pub color: Rgba<u8>,
+}
+
+impl VoxelType for VoxelWithColor {
+    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
+        Self { pos, color }
+    }
+
+    fn pos(&self) -> U8Vec3 {
+        self.pos
+    }
+}
+
+impl VoxelType for dot_vox::Voxel {
+    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
+        Self {
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+            i: encode_color(color.0),
+        }
+    }
+
+    fn pos(&self) -> U8Vec3 {
+        U8Vec3 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
+    }
+}
 
 // 6 shades of Red (0..5)
 // 7 shades of Green (0..6)
@@ -14,7 +48,7 @@ const B_STEPS: u16 = 6;
 
 /// Maps an RGBA color to a palette index (1-253).
 /// Index 0 is reserved for 'Air' in `MagicaVoxel`, so we shift everything by +1.
-pub const fn encode_color(color: [u8; 4]) -> u8 {
+fn encode_color(color: [u8; 4]) -> u8 {
     let r = color[0] as u16;
     let g = color[1] as u16;
     let b = color[2] as u16;
@@ -29,7 +63,7 @@ pub const fn encode_color(color: [u8; 4]) -> u8 {
 }
 
 /// Maps a palette index (1-253) back to an RGBA color.
-pub const fn decode_color(byte: u8) -> [u8; 4] {
+fn decode_color(byte: u8) -> [u8; 4] {
     if byte == 0 {
         return [0, 0, 0, 0];
     }
@@ -49,9 +83,12 @@ pub const fn decode_color(byte: u8) -> [u8; 4] {
 }
 
 #[profiling::function]
-pub fn quantize_colors(
-    chunks: Vec<Chunk<voxelizer::VoxelWithColor>>,
-) -> (Vec<Model>, Vec<IVec3>, Vec<dot_vox::Color>) {
+fn quantize_colors(
+    chunks: Vec<Chunk<VoxelWithColor>>,
+) -> (Vec<dot_vox::Model>, Vec<IVec3>, Vec<dot_vox::Color>) {
+    use quantette::{ImageRef, PaletteSize, Pipeline, QuantizeMethod, deps::palette::rgb::Rgb};
+    use rayon::prelude::*;
+
     let voxel_colors = {
         profiling::scope!("extract_colors");
 
@@ -92,8 +129,6 @@ pub fn quantize_colors(
 
     let indices = output.indices();
 
-    // We zip chunks with their corresponding slice of indices
-    // This allows us to process every chunk deeply in parallel without locking.
     let (models, origins) = chunks
         .into_iter()
         .scan(0, |offset, chunk| {
@@ -121,7 +156,7 @@ pub fn quantize_colors(
                 .collect();
 
             (
-                Model {
+                dot_vox::Model {
                     size: dot_vox::Size {
                         x: 256,
                         y: 256,
@@ -143,7 +178,7 @@ pub fn quantize_colors(
     reason = "we don't have access to the AHashMap type"
 )]
 pub fn save_vox_dynamic(
-    chunks: Vec<voxelizer::Chunk<voxelizer::VoxelWithColor>>,
+    chunks: Vec<Chunk<VoxelWithColor>>,
     file_path: &Path,
     shift: IVec3,
 ) -> Result<()> {
@@ -224,7 +259,7 @@ pub fn save_vox_dynamic(
     reason = "we don't have access to the AHashMap type"
 )]
 pub fn save_vox_static(
-    chunks: Vec<voxelizer::Chunk<dot_vox::Voxel>>,
+    chunks: Vec<Chunk<dot_vox::Voxel>>,
     file_path: &Path,
     shift: IVec3,
 ) -> Result<()> {
