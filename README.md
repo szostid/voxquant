@@ -9,12 +9,14 @@ The loading of the gltf files is partially multithreaded. Unformtunately, I do n
 Usage: `mesh_to_vox [OPTIONS] --input <INPUT> --output <OUTPUT>`
 
 Options:
--   `-i, --input <INPUT>`    The input file that will be voxelized
--   `-o, --output <OUTPUT>`  The output file after voxelization
-- `--dim <DIM>`        The resolution of the output model [default: 1022]
--  `--sparse <SPARSE>`  [default: true] [possible values: true, false]
--   `-h, --help`             Print help
--   `-V, --version`          Print version
+- `-i, --input <INPUT>`    The input file that will be voxelized
+- `-o, --output <OUTPUT>`  The output file after voxelization
+- `-r, --res <RES>`        The resolution of the output model [default: 1024]
+- `--base-scale`           The default scale of the model [default: 1.0]
+- `--mode`                 The voxelization mode (triangles / wireframe / points) [default: triangles]
+- `--no-optimization`      Disables deduplication of voxels. If two triangles share a voxel, both voxels will be present in the output file
+- `-h, --help`             Print help
+- `-V, --version`          Print version
 
 ## Installation
 [Cargo](https://www.rust-lang.org/tools/install 'Cargo') is requried for installation. Clone the repo and run with `cargo run --release -- (arguments)`
