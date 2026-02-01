@@ -243,7 +243,7 @@ fn voxelize_line(store: &mut Chunk, shading: &TriangleData, p1: Vec3, p2: Vec3) 
 /// Voxelizes the points of the provided `triangle`
 #[inline]
 fn voxelize_points(store: &mut Chunk, shading: &TriangleData, triangle: Triangle) {
-    let [a, b, c] = triangle.map(|p| p.as_ivec3());
+    let [a, b, c] = triangle.vertices.map(|p| p.pos.as_ivec3());
 
     store.add_voxel(a, shading.sample_from_bary(Vec3::X));
     store.add_voxel(b, shading.sample_from_bary(Vec3::Y));
@@ -338,12 +338,13 @@ fn voxelize_chunk(
         // we have to translate every vertex into a position relative to
         // the bounds of the storage, and then scaled to fit as well as
         // possible
-        let vertices = mesh.triangles[tri].map(|vertex| (vertex - mesh.bounds.min) * scale);
+        let mut triangle = mesh.triangles[tri];
 
-        let extras = mesh.triangle_extras[tri];
+        for vertex in &mut triangle.vertices {
+            vertex.pos = (vertex.pos - mesh.bounds.min) * scale;
+        }
 
-        // material_idx should be uniform across extras so this shouldnt matter
-        let mat_id = extras[0].material_idx;
+        let mat_id = triangle.material_index;
 
         let material = mesh
             .materials
@@ -352,24 +353,24 @@ fn voxelize_chunk(
 
         let texture = material.texturing.as_ref().map(|data| TriangleTextureData {
             texture: &data.texture,
-            uvs: extras.map(|e| e.uv().unwrap()),
+            uvs: triangle.uvs().unwrap(),
             wrap: data.wrap_mode,
         });
 
         let shading = TriangleData {
             texture,
-            precalc: geometry::TriangleInterpolator::new(vertices),
-            vert_colors: extras.map(|extra| Rgba(extra.color)),
+            precalc: geometry::TriangleInterpolator::new(triangle),
+            vert_colors: triangle.colors(),
             base_color: material.base_color,
             alpha_threshold: material.alpha_threshold,
         };
 
         match mode {
             VoxelizationMode::Triangles => {
-                voxelize_triangle(&mut chunk, &shading, vertices, chunk_base);
+                voxelize_triangle(&mut chunk, &shading, triangle, chunk_base);
             }
-            VoxelizationMode::Wireframe => voxelize_wireframe(&mut chunk, &shading, vertices),
-            VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, vertices),
+            VoxelizationMode::Wireframe => voxelize_wireframe(&mut chunk, &shading, triangle),
+            VoxelizationMode::Points => voxelize_points(&mut chunk, &shading, triangle),
         }
     }
 
@@ -388,12 +389,13 @@ fn group_triangles(mesh: &Mesh, size: u32) -> HashMap<IVec3, Vec<usize>> {
     let scale = size as f32 / largest_dim;
 
     for (idx, tri) in mesh.triangles.iter().enumerate() {
-        let voxel_verts = tri
-            .map(|vertex| vertex - mesh.bounds.min)
+        let [a, b, c] = tri
+            .vertices
+            .map(|vertex| vertex.pos - mesh.bounds.min)
             .map(|vertex| vertex * scale);
 
-        let min = voxel_verts[0].min(voxel_verts[1]).min(voxel_verts[2]);
-        let max = voxel_verts[0].max(voxel_verts[1]).max(voxel_verts[2]);
+        let min = a.min(b).min(c);
+        let max = a.max(b).max(c);
 
         let min_chunk = (min / 256.0).floor().as_ivec3();
         let max_chunk = (max / 256.0).floor().as_ivec3();

@@ -1,7 +1,8 @@
 use crate::*;
+use geometry::{Triangle, Vertex};
 use glam::{Mat4, Vec2, Vec3};
 use rayon::prelude::*;
-use scene::{Material, MaterialTexturing, Mesh, VertexExtras, WrapMode};
+use scene::{Material, MaterialTexturing, Mesh, WrapMode};
 use std::sync::Arc;
 
 struct MeshInstance<'a> {
@@ -178,7 +179,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
 struct MeshScratch {
     positions: Vec<Vec3>,
     uvs: Vec<Vec2>,
-    colors: Vec<[u8; 4]>,
+    colors: Vec<Rgba<u8>>,
     indices: Vec<u32>,
 }
 
@@ -189,13 +190,11 @@ fn parse_mesh_instance(
     materials: &[Material],
     buffers: &[gltf::buffer::Data],
     triangles: &mut Vec<Triangle>,
-    extras: &mut Vec<TriangleExtras>,
     scratch: &mut MeshScratch,
 ) -> Result<()> {
     fn push_triangle(
         [i1, i2, i3]: [u32; 3],
         triangles: &mut Vec<Triangle>,
-        extras: &mut Vec<TriangleExtras>,
         scratch: &MeshScratch,
         material_idx: u32,
     ) {
@@ -211,29 +210,26 @@ fn parse_mesh_instance(
             return;
         }
 
-        triangles.push([
-            scratch.positions[i1],
-            scratch.positions[i2],
-            scratch.positions[i3],
-        ]);
-
-        extras.push([
-            VertexExtras::new(
-                scratch.uvs.get(i1).copied(),
-                scratch.colors.get(i1).copied(),
-                material_idx,
-            ),
-            VertexExtras::new(
-                scratch.uvs.get(i2).copied(),
-                scratch.colors.get(i2).copied(),
-                material_idx,
-            ),
-            VertexExtras::new(
-                scratch.uvs.get(i3).copied(),
-                scratch.colors.get(i3).copied(),
-                material_idx,
-            ),
-        ]);
+        triangles.push(Triangle {
+            vertices: [
+                Vertex::new(
+                    scratch.positions[i1],
+                    scratch.uvs.get(i1).copied(),
+                    scratch.colors.get(i1).copied(),
+                ),
+                Vertex::new(
+                    scratch.positions[i2],
+                    scratch.uvs.get(i2).copied(),
+                    scratch.colors.get(i2).copied(),
+                ),
+                Vertex::new(
+                    scratch.positions[i3],
+                    scratch.uvs.get(i3).copied(),
+                    scratch.colors.get(i3).copied(),
+                ),
+            ],
+            material_index: material_idx,
+        });
     }
 
     for primitive in instance.mesh.primitives() {
@@ -266,7 +262,7 @@ fn parse_mesh_instance(
 
         scratch.colors.clear();
         if let Some(color_iter) = reader.read_colors(0) {
-            let color_iter = color_iter.into_rgba_u8();
+            let color_iter = color_iter.into_rgba_u8().map(Rgba);
 
             scratch.colors.extend(color_iter);
         }
@@ -283,7 +279,7 @@ fn parse_mesh_instance(
                 let (triangle_indices, _) = scratch.indices.as_chunks::<3>();
 
                 for &triangle in triangle_indices {
-                    push_triangle(triangle, triangles, extras, scratch, material_idx as u32);
+                    push_triangle(triangle, triangles, scratch, material_idx as u32);
                 }
             }
             gltf::mesh::Mode::TriangleStrip => {
@@ -294,21 +290,9 @@ fn parse_mesh_instance(
 
                     // winding order flips every odd triangle
                     if i.is_multiple_of(2) {
-                        push_triangle(
-                            [idx0, idx1, idx2],
-                            triangles,
-                            extras,
-                            scratch,
-                            material_idx as u32,
-                        );
+                        push_triangle([idx0, idx1, idx2], triangles, scratch, material_idx as u32);
                     } else {
-                        push_triangle(
-                            [idx0, idx2, idx1],
-                            triangles,
-                            extras,
-                            scratch,
-                            material_idx as u32,
-                        );
+                        push_triangle([idx0, idx2, idx1], triangles, scratch, material_idx as u32);
                     }
                 }
             }
@@ -321,13 +305,7 @@ fn parse_mesh_instance(
                             unreachable!()
                         };
 
-                        push_triangle(
-                            [idx0, idx1, idx2],
-                            triangles,
-                            extras,
-                            scratch,
-                            material_idx as u32,
-                        );
+                        push_triangle([idx0, idx1, idx2], triangles, scratch, material_idx as u32);
                     }
                 }
             }
@@ -419,7 +397,6 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
         .sum();
 
     let mut triangles = Vec::with_capacity(total_triangles);
-    let mut triangle_extras = Vec::with_capacity(total_triangles);
     let mut bounds = BoundingBox::zero();
 
     let mut scratch = MeshScratch::default();
@@ -431,7 +408,6 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
             &materials,
             &buffers,
             &mut triangles,
-            &mut triangle_extras,
             &mut scratch,
         ) {
             eprintln!("failed to parse mesh: {e}");
@@ -440,7 +416,6 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
 
     Ok(Mesh {
         triangles,
-        triangle_extras,
         materials,
         bounds,
     })

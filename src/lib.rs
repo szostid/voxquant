@@ -10,9 +10,9 @@
 use anyhow::{Context as _, Result, bail};
 use clap::Parser;
 use image::{Rgba, RgbaImage};
-use std::path::Path;
+use std::fmt::Display;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
-use std::{fmt::Display, path::PathBuf};
 
 mod formats;
 mod geometry;
@@ -20,7 +20,7 @@ mod math;
 mod scene;
 mod voxelizer;
 
-use geometry::{BoundingBox, Triangle, TriangleExtras};
+use geometry::{BoundingBox, Triangle};
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum VoxelizationMode {

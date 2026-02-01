@@ -1,31 +1,6 @@
 use crate::*;
-use bytemuck::{Pod, Zeroable};
-use glam::Vec2;
 use std::sync::Arc;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Zeroable, Pod)]
-pub struct VertexExtras {
-    uv: Vec2,
-    pub color: [u8; 4],
-    pub material_idx: u32,
-}
-
-impl VertexExtras {
-    pub fn new(uv: Option<Vec2>, color: Option<[u8; 4]>, material_idx: u32) -> Self {
-        Self {
-            uv: uv.unwrap_or(Vec2::NAN),
-            color: color.unwrap_or([255, 255, 255, 255]),
-            material_idx,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn uv(&self) -> Option<Vec2> {
-        (self.uv != Vec2::NAN).then_some(self.uv)
-    }
-}
 
 pub struct Material {
     pub texturing: Option<MaterialTexturing>,
@@ -63,8 +38,6 @@ pub struct MaterialTexturing {
 
 pub struct Mesh {
     pub triangles: Vec<Triangle>,
-    pub triangle_extras: Vec<TriangleExtras>,
     pub materials: Vec<Material>,
-
     pub bounds: BoundingBox,
 }
