@@ -107,7 +107,7 @@ pub fn save_vox(chunks: Vec<voxelizer::Chunk>, file_path: &Path, shift: IVec3) -
             frames: vec![Frame {
                 attributes: [(
                     "_t".to_string(),
-                    format!("{} {} {}", origin.x, origin.z, origin.y),
+                    format!("{} {} {}", origin.x, origin.y, origin.z),
                 )]
                 .into(),
             }],

@@ -28,11 +28,10 @@ impl Chunk {
             return;
         };
 
-        // GLTF is Y-up magicavoxel is Z-up
         self.voxels.push(Voxel {
             x: pos_in_chunk.x,
-            y: pos_in_chunk.z,
-            z: pos_in_chunk.y,
+            y: pos_in_chunk.y,
+            z: pos_in_chunk.z,
             i: crate::formats::vox::encode_color(color.0),
         });
     }

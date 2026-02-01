@@ -3,7 +3,7 @@ use geometry::{Triangle, Vertex};
 use glam::{Mat4, Vec2, Vec3};
 use rayon::prelude::*;
 use scene::{Material, MaterialTexturing, Mesh, WrapMode};
-use std::sync::Arc;
+use std::{f32::consts::FRAC_PI_2, sync::Arc};
 
 struct MeshInstance<'a> {
     mesh: gltf::Mesh<'a>,
@@ -377,10 +377,13 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Mesh> {
         base_color: Rgba([255, 255, 255, 255]),
     });
 
+    // we need to rotate 90* to rotate from Y-up (GLTF) into Z-up (.vox)
+    let root_transform = Mat4::from_rotation_x(FRAC_PI_2) * Mat4::from_scale(Vec3::splat(scale));
+
     let mut instances = Vec::new();
     for scene in document.scenes() {
         for node in scene.nodes() {
-            collect_instances(node, Mat4::from_scale(Vec3::splat(scale)), &mut instances);
+            collect_instances(node, root_transform, &mut instances);
         }
     }
 
