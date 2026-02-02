@@ -15,23 +15,13 @@ pub fn voxelize_and_save(scene: Scene, args: &Args) -> Result<()> {
 
     match args.color {
         ColorMode::Static => {
-            let t1 = Instant::now();
             let data = voxelization::voxelize(&scene, args.res, args.mode, !args.no_optimization);
-            let t2 = Instant::now();
-            println!("Scene voxelized in {}s", (t2 - t1).as_secs_f32());
             serialization::save_vox_static(data, &args.output, center_offset)?;
-            let t3 = Instant::now();
-            println!("Scene saved in {}s", (t3 - t2).as_secs_f32());
         }
         #[cfg(feature = "dynamic_palette")]
         ColorMode::Dynamic => {
-            let t1 = Instant::now();
             let data = voxelization::voxelize(&scene, args.res, args.mode, !args.no_optimization);
-            let t2 = Instant::now();
-            println!("Scene voxelized in {}s", (t2 - t1).as_secs_f32());
             serialization::save_vox_dynamic(data, &args.output, center_offset)?;
-            let t3 = Instant::now();
-            println!("Scene saved in {}s", (t3 - t2).as_secs_f32());
         }
     }
 

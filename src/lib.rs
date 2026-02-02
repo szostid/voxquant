@@ -133,6 +133,10 @@ pub fn voxelize(args: &Args) -> Result<()> {
         OutputType::MagicaVoxel => formats::magicavoxel::voxelize_and_save(scene, args)?,
     }
 
+    let t2 = Instant::now();
+
+    println!("Scene converted and saved in {}s", (t2 - t1).as_secs_f32());
+
     Ok(())
 }
 

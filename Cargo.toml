@@ -1,8 +1,8 @@
 [package]
-name = "mesh_to_vox"
+name = "voxquant"
 version = "0.2.0"
 edition = "2024"
-repository = "https://github.com/szostid/MeshToVox"
+repository = "https://github.com/szostid/voxquant"
 keywords = ["glTF", "3D", "Voxel", "magicavoxel", "dotvox", "cli"]
 description = "A program to convert triangle meshes to voxels."
 

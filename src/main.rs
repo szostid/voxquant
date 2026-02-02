@@ -7,6 +7,6 @@ fn main() -> Result<()> {
 
     rayon::ThreadPoolBuilder::new().build_global()?;
 
-    let args = mesh_to_vox::Args::parse();
-    mesh_to_vox::voxelize(&args)
+    let args = voxquant::Args::parse();
+    voxquant::voxelize(&args)
 }

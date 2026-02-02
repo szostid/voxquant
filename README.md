@@ -1,4 +1,4 @@
-# MeshToVox
+# Voxquant
 Voxelizer of triangle meshes into voxels.
 
 The command line utility supports loading `.gltf`/`.glb` files and saving `.vox` files.
@@ -10,7 +10,7 @@ Both `.gltf` loading and voxelization are parallelized. The vast majority of `gl
 [1] Missing features: skinning, morph targets, texture transforms 
 
 ## CLI Usage
-Usage: `mesh_to_vox -i <INPUT> -o <OUTPUT> [OPTIONS] `
+Usage: `voxquant -i <INPUT> -o <OUTPUT> [OPTIONS] `
 
 Options:
 - `-i, --input <INPUT>`    The input file that will be voxelized
