@@ -2,7 +2,9 @@ use crate::*;
 
 use super::voxelization::{Chunk, VoxelType};
 
+use dot_vox::{Color, Model, Voxel};
 use glam::{IVec3, U8Vec3};
+use std::num::NonZeroU8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct VoxelWithColor {
@@ -83,9 +85,7 @@ fn decode_color(byte: u8) -> [u8; 4] {
 }
 
 #[profiling::function]
-fn quantize_colors(
-    chunks: Vec<Chunk<VoxelWithColor>>,
-) -> (Vec<dot_vox::Model>, Vec<IVec3>, Vec<dot_vox::Color>) {
+fn quantize_colors(chunks: Vec<Chunk<VoxelWithColor>>) -> (Vec<Model>, Vec<IVec3>, Vec<Color>) {
     use quantette::{ImageRef, PaletteSize, Pipeline, QuantizeMethod, deps::palette::rgb::Rgb};
     use rayon::prelude::*;
 
@@ -110,7 +110,7 @@ fn quantize_colors(
 
     let output = Pipeline::new()
         .quantize_method(QuantizeMethod::Wu)
-        .palette_size(PaletteSize::MAX)
+        .palette_size(PaletteSize::from_nz_u8(NonZeroU8::new(255).unwrap()))
         .ditherer(None)
         .parallel(true)
         .input_image(ImageRef::new(voxel_colors.len() as u32, 1, &voxel_colors).unwrap())
@@ -147,7 +147,7 @@ fn quantize_colors(
                 .voxels
                 .iter()
                 .zip(voxel_indices)
-                .map(|(raw, &idx)| dot_vox::Voxel {
+                .map(|(raw, &idx)| Voxel {
                     x: raw.pos.x,
                     y: raw.pos.y,
                     z: raw.pos.z,
@@ -156,7 +156,7 @@ fn quantize_colors(
                 .collect();
 
             (
-                dot_vox::Model {
+                Model {
                     size: dot_vox::Size {
                         x: 256,
                         y: 256,
