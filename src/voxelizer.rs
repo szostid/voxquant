@@ -1,40 +1,163 @@
-use crate::io::{ImageOrColor, Mesh};
-use crate::math::{closest_point_triangle, get_barycentric_coordinates};
-use crate::octree::*;
-use glam::*;
+use crate::*;
+use geometry::Triangle;
+use scene::{Scene, WrapMode};
 
-fn voxelize_wireframe(store: &mut Octree, shading: &Shading, tri_pos: [Vec3; 3]) {
-    voxelize_line(store, shading, tri_pos[0], tri_pos[1]);
-    voxelize_line(store, shading, tri_pos[1], tri_pos[2]);
-    voxelize_line(store, shading, tri_pos[0], tri_pos[2]);
+use glam::{IVec3, Vec2, Vec3, Vec4};
+use std::ops::Range;
+
+pub trait VoxelStore {
+    fn add_voxel(&mut self, pos: IVec3, color: Rgba<u8>, is_emissive: bool);
 }
 
-fn voxelize_triangle(store: &mut Octree, shading: &Shading, tri_pos: [Vec3; 3]) {
-    const LINES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
+/// Voxelizes the edges of the provided `triangle`.
+#[inline]
+fn voxelize_wireframe<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangle: Triangle) {
+    voxelize_line(store, shading, triangle[0], triangle[1]);
+    voxelize_line(store, shading, triangle[1], triangle[2]);
+    voxelize_line(store, shading, triangle[0], triangle[2]);
+}
 
-    let (a, b, ab) = LINES
-        .map(|(a, b)| (a, b, tri_pos[a].distance_squared(tri_pos[b])))
-        .into_iter()
-        .max_by(|(_, _, l1), (_, _, l2)| l1.total_cmp(l2))
-        .map(|(a, b, ab)| (a, b, ab.sqrt()))
-        .unwrap();
+/// Voxelizes the provided `triangle`.
+///
+/// If the triangle is small, or string-like then this will instead fallback
+/// to wireframe voxelization.
+#[inline]
+#[expect(clippy::similar_names, reason = "`u` vs `v` is quite clear")]
+#[expect(clippy::suboptimal_flops, reason = "FMA makes the function unreadable")]
+fn voxelize_triangle<T: VoxelStore>(
+    store: &mut T,
+    shading: &TriangleData,
+    triangle: Triangle,
+    range: Range<IVec3>,
+) {
+    // TLDR: we voxelize the triangle by flattening it onto some plane
+    // and then by iterating over points on that plane, unflattening
+    // them back onto the triangle
+    //
+    // Detailed description:
+    //
+    // we pick the plane as the axis-aligned plane on which the
+    // triangle will take up the most area. the axis of the normal
+    // of that plane is called `d` here. the two other axes are `u, v`
+    //
+    // we project the points onto that plane, creating a new 2D triangle
+    // made up of the points `a, b, c`.
+    //
+    // if that triangle is very small, or very string-like, then the DDA
+    // loop will likely produce incomplete results (because of aliasing,
+    // similar to fences in some antialiasing implementations) because it
+    // will miss too many voxels. in that case, we just voxelize the edges
+    // of the triangles as lines and skip the normal voxelization loop.
+    //
+    // the rest of the algorythm consists of finding the bounds of this
+    // 2D triangle and iterating over their bounding box. for every
+    // picked point we find its barycentric coordinates and determine
+    // if it is within the triangle.
+    //
+    // if a picked point lies within the triangle, we need to solve the
+    // equation for a point that would lie on the plane defined by the
+    // original triangle to determine the third (so-called depth) coordinate
+    // of the point. then we can derive the original coordinates of the point
+    // and append it to the store.
+    let normal = shading.precalc.normal();
 
-    let c = 3 - a - b;
+    let d_axis = normal.abs().max_position();
+    let u_axis = (d_axis + 1) % 3;
+    let v_axis = (d_axis + 2) % 3;
 
-    // ab is the longest line, c is the point that doesn't lay on it
-    // we want to cast a bunch of lines from the point c onto the longest line ab
+    let normal_u = normal[u_axis];
+    let normal_v = normal[v_axis];
+    let normal_d_inv = 1.0 / normal[d_axis];
+    // plane constant (plane is defined by `P dot N = D`)
+    let plane_d = normal.dot(triangle[0]);
 
-    let num_steps = (ab.ceil() as i32).max(1);
-    let dir = (tri_pos[b] - tri_pos[a]) / num_steps as f32;
+    // project A, B, C onto the axis
+    let a = Vec2::new(triangle[0][u_axis], triangle[0][v_axis]);
+    let b = Vec2::new(triangle[1][u_axis], triangle[1][v_axis]);
+    let c = Vec2::new(triangle[2][u_axis], triangle[2][v_axis]);
 
-    for i in 0..=num_steps {
-        let start = tri_pos[a] + dir * i as f32;
-        voxelize_line(store, shading, start, tri_pos[c]);
+    let ab = b - a;
+    let ac = c - a;
+
+    // note: area of a triangle would technically be 1/2 * (AB x AC)
+    // but since we're using the ratios anyways, the 1/2 would cancel
+    // out (perp_dot is the cross product)
+    let area = ab.perp_dot(ac);
+    let area_inv = 1.0 / area;
+
+    if area.abs() < f32::EPSILON {
+        return;
+    }
+
+    let min = a.min(b).min(c).floor().as_ivec2();
+    let max = a.max(b).max(c).ceil().as_ivec2();
+
+    {
+        let bbox_size = max - min;
+        let bbox_area = bbox_size.x * bbox_size.y;
+
+        let is_tiny = bbox_size.x <= 2 || bbox_size.y <= 2;
+
+        // we consider the triangle to be a thin string whenever
+        // the area of the triangle within the bounding box is
+        // much smaller than the area of the triangle (that is,
+        // the triangle takes up very little of the space within
+        // the bounding box)
+        //
+        // NOTE: no need to handle near-zero bbox_area because then
+        // `is_tiny` will be true and we will voxelize as wifeframe
+        // anyways
+        let density = area.abs() / bbox_area as f32;
+        let is_string = density < 0.05;
+
+        if is_tiny || is_string {
+            voxelize_wireframe(store, shading, triangle);
+            return;
+        }
+    }
+
+    let u_start = min.x.max(range.start[u_axis]);
+    let u_end = max.x.min(range.end[u_axis]);
+    let v_start = min.y.max(range.start[v_axis]);
+    let v_end = max.y.min(range.end[v_axis]);
+
+    for u in u_start..=u_end {
+        for v in v_start..=v_end {
+            let p = Vec2::new(u as f32 + 0.5, v as f32 + 0.5);
+            let ap = p - a;
+
+            let c_bary = ab.perp_dot(ap) * area_inv; // area of APB / area of ABC
+            let b_bary = ap.perp_dot(ac) * area_inv; // area of APC / area of ABC
+            let a_bary = 1.0 - c_bary - b_bary;
+
+            if a_bary >= 0.0 && b_bary >= 0.0 && c_bary >= 0.0 {
+                // we need to find the depth. we solve the equation of the plane defined by the
+                // triangle to find the `d` (third/z) coordinate of a point `P` that lies on it:
+                // N dot P = D
+                // N.u * u + N.v * v + N.d * d = D
+                // N.d * d = D - N.u * u - N.v * v
+                // d = (D - N.u * u - N.v * v) / N.d
+                // note that `plane_d` is the plane constant `D` from the equation above
+                let depth = (plane_d - normal_u * p.x - normal_v * p.y) * normal_d_inv;
+
+                let mut voxel_pos = IVec3::ZERO;
+                voxel_pos[u_axis] = u;
+                voxel_pos[v_axis] = v;
+                voxel_pos[d_axis] = depth.round() as i32;
+
+                let color = shading.sample_from_bary(Vec3::new(a_bary, b_bary, c_bary));
+
+                if let Some(color) = color {
+                    store.add_voxel(voxel_pos, color, shading.is_emissive());
+                }
+            }
+        }
     }
 }
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
-fn voxelize_line(store: &mut Octree, shading: &Shading, p1: Vec3, p2: Vec3) {
+#[inline]
+fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3, p2: Vec3) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
@@ -50,145 +173,218 @@ fn voxelize_line(store: &mut Octree, shading: &Shading, p1: Vec3, p2: Vec3) {
 
     let inv_dir = Vec3::ONE / ray_dir;
 
-    let mut map_pos = ray_pos.floor().as_ivec3();
+    let mut voxel_pos = ray_pos.floor().as_ivec3();
 
     let t_delta = inv_dir.abs();
     let step = ray_dir.signum().as_ivec3();
 
     let step_clamped = step.max(IVec3::ZERO);
-    let next_pos = (map_pos + step_clamped).as_vec3();
+    let next_pos = (voxel_pos + step_clamped).as_vec3();
 
     let mut t_max = (next_pos - ray_pos) * inv_dir;
 
     loop {
-        let color = shading.get_color(map_pos);
+        let color = shading.snap_and_get_color(voxel_pos);
 
-        // alpha cutoff
-        if color.0[3] > 128 {
-            store.store(map_pos, color);
+        if let Some(color) = color {
+            store.add_voxel(voxel_pos, color, shading.is_emissive());
         }
 
-        if map_pos == end {
+        if voxel_pos == end {
             break;
         }
 
         let smallest = t_max.min_position();
 
         t_max[smallest] += t_delta[smallest];
-        map_pos[smallest] += step[smallest];
+        voxel_pos[smallest] += step[smallest];
     }
 }
 
-fn voxelize_point(store: &mut Octree, point: Vec3) {
-    let point = point.round().as_ivec3();
-    store.store(point, image::Rgba([32, 32, 32, 255]));
+/// Voxelizes the points of the provided `triangle`
+#[inline]
+fn voxelize_points<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangle: Triangle) {
+    let [a, b, c] = triangle.vertices.map(|p| p.pos.as_ivec3());
+
+    if let Some(color) = shading.sample_from_bary(Vec3::X) {
+        store.add_voxel(a, color, shading.is_emissive())
+    }
+    if let Some(color) = shading.sample_from_bary(Vec3::Y) {
+        store.add_voxel(b, color, shading.is_emissive())
+    }
+    if let Some(color) = shading.sample_from_bary(Vec3::Z) {
+        store.add_voxel(c, color, shading.is_emissive())
+    }
 }
 
-#[derive(Debug)]
-struct TexturedShading<'a> {
-    pub image: &'a image::RgbaImage,
-    pub vertices: [Vec3; 3],
+#[inline]
+#[must_use]
+fn interpolate_color(colors: [Rgba<u8>; 3], bary: Vec3) -> Rgba<u8> {
+    let c0 = Vec4::from_array(colors[0].0.map(|c| c as f32));
+    let c1 = Vec4::from_array(colors[1].0.map(|c| c as f32));
+    let c2 = Vec4::from_array(colors[2].0.map(|c| c as f32));
+
+    let final_color = c0 * bary.x + c1 * bary.y + c2 * bary.z;
+
+    Rgba([
+        final_color.x as u8,
+        final_color.y as u8,
+        final_color.z as u8,
+        final_color.w as u8,
+    ])
+}
+
+#[inline]
+#[must_use]
+fn multiply_colors(c1: Rgba<u8>, c2: Rgba<u8>) -> Rgba<u8> {
+    Rgba([
+        ((c1[0] as u16 * c2[0] as u16) / 255) as u8,
+        ((c1[1] as u16 * c2[1] as u16) / 255) as u8,
+        ((c1[2] as u16 * c2[2] as u16) / 255) as u8,
+        ((c1[3] as u16 * c2[3] as u16) / 255) as u8,
+    ])
+}
+
+struct TriangleTextureData<'a> {
+    pub texture: &'a RgbaImage,
     pub uvs: [Vec2; 3],
+    pub wrap: [WrapMode; 2],
 }
 
-#[derive(Debug)]
-enum Shading<'a> {
-    Texture(TexturedShading<'a>),
-    Color(image::Rgba<u8>),
+struct TriangleData<'a> {
+    precalc: geometry::TriangleInterpolator,
+    vert_colors: [Rgba<u8>; 3],
+    base_color: Rgba<u8>,
+    is_emissive: bool,
+    texture: Option<TriangleTextureData<'a>>,
+    alpha_threshold: Option<u8>,
 }
 
-impl Shading<'_> {
-    pub fn get_color(&self, map_pos: IVec3) -> image::Rgba<u8> {
-        match self {
-            Shading::Texture(texture) => {
-                let point = closest_point_triangle(map_pos.as_vec3(), texture.vertices);
-
-                let barycentric = get_barycentric_coordinates(point, texture.vertices);
-
-                let mut texture_cords = (texture.uvs[0] * barycentric.x)
-                    + (texture.uvs[1] * barycentric.y)
-                    + (texture.uvs[2] * barycentric.z);
-
-                texture_cords.x = texture_cords.x.rem_euclid(1.0);
-                texture_cords.y = texture_cords.y.rem_euclid(1.0);
-
-                let (x, y) = texture.image.dimensions();
-                let x = (((x - 1) as f32) * texture_cords.x) as u32;
-                let y = (((y - 1) as f32) * texture_cords.y) as u32;
-
-                *texture.image.get_pixel(x, y)
-            }
-
-            Shading::Color(color) => *color,
-        }
+impl TriangleData<'_> {
+    #[inline]
+    pub fn is_emissive(&self) -> bool {
+        self.is_emissive
     }
-}
 
-#[derive(Debug, Clone, Copy)]
-pub enum VoxelizationMode {
-    Triangles,
-    Lines,
-    Points,
-}
+    pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Rgba<u8>> {
+        bary = bary.max(Vec3::ZERO);
 
-#[profiling::function]
-pub fn voxelize(mesh: &Mesh, size: u32, mode: VoxelizationMode) -> Octree {
-    let num_tris = mesh.triangles.len();
+        let sum = bary.x + bary.y + bary.z;
+        if sum > f32::EPSILON {
+            bary /= sum;
+        }
 
-    // leave one voxel gap around model to allow for inside/outside checking
-    let max_size = size - 1;
-    let depth = 31 - (size + 1).leading_zeros();
+        let vertex_color = interpolate_color(self.vert_colors, bary);
 
-    let largest_dim = mesh.bounds.size().max_element();
+        let base_color = match self.texture {
+            Some(TriangleTextureData {
+                texture,
+                uvs,
+                wrap: [wrap_u, wrap_v],
+            }) => {
+                let mut uv = (uvs[0] * bary.x) + (uvs[1] * bary.y) + (uvs[2] * bary.z);
 
-    let scale = max_size as f32 / largest_dim;
+                uv.x = wrap_u.apply(uv.x);
+                uv.y = wrap_v.apply(uv.y);
 
-    let mut tree = Octree::new(depth);
+                let (w, h) = texture.dimensions();
+                let x = (((w - 1) as f32) * uv.x) as u32;
+                let y = (((h - 1) as f32) * uv.y) as u32;
 
-    for tri in 0..num_tris {
-        // we have to translate every vertex into a position relative to
-        // the bounds of the storage, and then scaled to fit as well as
-        // possible
-        let vertices = mesh.triangles[tri]
-            .map(|vertex| vertex - mesh.bounds.min)
-            .map(|vertex| vertex * scale)
-            .map(|vertex| vertex + Vec3::ONE);
+                let tex_color = *texture.get_pixel(x, y);
 
-        let mat_id = mesh.triangle_extras[tri][0].material_idx;
-        let material = mesh
-            .materials
-            .get(mat_id as usize)
-            .unwrap_or(&mesh.materials[0]);
-
-        let shading = match material {
-            ImageOrColor::Image(image) => {
-                let uvs = mesh.triangle_extras[tri].map(|extras| extras.uv().unwrap());
-
-                let texture = TexturedShading {
-                    image,
-                    vertices,
-                    uvs,
-                };
-
-                Shading::Texture(texture)
+                multiply_colors(tex_color, self.base_color)
             }
-            ImageOrColor::Color(color) => Shading::Color(*color),
+            None => self.base_color,
         };
 
-        match mode {
-            VoxelizationMode::Triangles => {
-                voxelize_triangle(&mut tree, &shading, vertices);
+        let color = multiply_colors(base_color, vertex_color);
+
+        if let Some(threshold) = self.alpha_threshold
+            && color.0[3] < threshold
+        {
+            return None;
+        }
+
+        Some(color)
+    }
+
+    pub fn snap_and_get_color(&self, pos: IVec3) -> Option<Rgba<u8>> {
+        let bary = self.precalc.get_closest_barycentric(pos.as_vec3());
+
+        self.sample_from_bary(bary)
+    }
+}
+
+pub struct SceneSlice<'a> {
+    pub mesh: &'a Scene,
+    pub range: Range<IVec3>,
+    pub indices: Option<&'a [usize]>,
+}
+
+impl<'a> SceneSlice<'a> {
+    pub fn for_each_triangle(&self, mut op: impl FnMut(Triangle)) {
+        match self.indices {
+            Some(indices) => {
+                for &idx in indices {
+                    // Direct indexing branch
+                    op(self.mesh.triangles[idx]);
+                }
             }
-            VoxelizationMode::Lines => {
-                voxelize_wireframe(&mut tree, &shading, vertices);
-            }
-            VoxelizationMode::Points => {
-                for point in vertices {
-                    voxelize_point(&mut tree, point);
+            None => {
+                for &tri in &self.mesh.triangles {
+                    // Contiguous slice branch
+                    op(tri);
                 }
             }
         }
     }
+}
 
-    tree
+#[profiling::function]
+pub fn voxelize_scene<T: VoxelStore>(
+    store: &mut T,
+    input: SceneSlice,
+    mode: VoxelizationMode,
+    size: u32,
+) {
+    let largest_dim = input.mesh.bounds.size().max_element();
+    let scale = size as f32 / largest_dim;
+
+    input.for_each_triangle(|mut triangle| {
+        for vertex in &mut triangle.vertices {
+            vertex.pos = (vertex.pos - input.mesh.bounds.min) * scale;
+        }
+
+        let mat_id = triangle.material_index;
+
+        let material = input
+            .mesh
+            .materials
+            .get(mat_id as usize)
+            .unwrap_or(&input.mesh.materials[0]);
+
+        let texture = material.texturing.as_ref().map(|data| TriangleTextureData {
+            texture: &data.texture,
+            uvs: triangle.uvs().unwrap(),
+            wrap: data.wrap_mode,
+        });
+
+        let shading = TriangleData {
+            texture,
+            precalc: geometry::TriangleInterpolator::new(triangle),
+            vert_colors: triangle.colors(),
+            is_emissive: material.emissive,
+            base_color: material.base_color,
+            alpha_threshold: material.alpha_threshold,
+        };
+
+        match mode {
+            VoxelizationMode::Triangles => {
+                voxelize_triangle(store, &shading, triangle, input.range.clone());
+            }
+            VoxelizationMode::Wireframe => voxelize_wireframe(store, &shading, triangle),
+            VoxelizationMode::Points => voxelize_points(store, &shading, triangle),
+        }
+    });
 }
