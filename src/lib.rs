@@ -14,10 +14,10 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-mod formats;
-mod geometry;
-mod scene;
-mod voxelizer;
+pub mod formats;
+pub mod geometry;
+pub mod scene;
+pub mod voxelizer;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum VoxelizationMode {
@@ -66,6 +66,7 @@ fn get_extension(path: &Path) -> Result<&str> {
         .context("failed to convert file extension to str")
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum InputType {
     GlbGltf,
 }
@@ -86,6 +87,7 @@ impl InputType {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OutputType {
     MagicaVoxel,
 }
@@ -115,8 +117,12 @@ pub fn voxelize(args: &Args) -> Result<()> {
     let t0 = Instant::now();
 
     let scene = match input_type {
-        InputType::GlbGltf => formats::gltf2::load_gltf(&args.input, args.base_scale)
-            .context("failed to load the input file")?,
+        InputType::GlbGltf => formats::gltf2::load_gltf(
+            &args.input,
+            args.base_scale,
+            output_type == OutputType::MagicaVoxel,
+        )
+        .context("failed to load the input file")?,
     };
 
     let t1 = Instant::now();

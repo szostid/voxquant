@@ -13,16 +13,19 @@ pub(crate) struct VoxelWithColor {
 }
 
 impl VoxelType for VoxelWithColor {
+    #[inline]
     fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
         Self { pos, color }
     }
 
+    #[inline]
     fn pos(&self) -> U8Vec3 {
         self.pos
     }
 }
 
 impl VoxelType for dot_vox::Voxel {
+    #[inline]
     fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
         Self {
             x: pos.x,
@@ -32,6 +35,7 @@ impl VoxelType for dot_vox::Voxel {
         }
     }
 
+    #[inline]
     fn pos(&self) -> U8Vec3 {
         U8Vec3 {
             x: self.x,
@@ -243,6 +247,7 @@ pub fn save_vox_dynamic(
         version: 150,
         models,
         palette,
+        index_map: (0..=255).collect(),
         materials: Vec::new(),
         layers: Vec::new(),
         scenes: nodes,
@@ -351,6 +356,7 @@ pub fn save_vox_static(
         models,
         palette,
         materials: Vec::new(),
+        index_map: (0..=255).collect(),
         layers: Vec::new(),
         scenes: nodes,
     };

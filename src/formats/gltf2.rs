@@ -108,11 +108,11 @@ fn get_material_texture_data(
         mat: &gltf::Material,
         f: impl FnOnce(gltf::texture::Info<'_>) -> R,
     ) -> Option<R> {
-        if let Some(info) = mat.pbr_metallic_roughness().base_color_texture() {
+        if let Some(info) = mat.emissive_texture() {
             return Some(f(info));
         }
 
-        if let Some(info) = mat.emissive_texture() {
+        if let Some(info) = mat.pbr_metallic_roughness().base_color_texture() {
             return Some(f(info));
         }
 
@@ -161,11 +161,18 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         gltf::material::AlphaMode::Blend => Some(250),
     };
 
-    let base_color = mat
-        .pbr_metallic_roughness()
-        .base_color_factor()
-        .map(|r| (r * 255.0) as u8)
-        .into();
+    let emissive = mat.emissive_factor().into_iter().any(|c| c > 0.0);
+
+    let base_color = if emissive {
+        let [r, g, b] = mat.emissive_factor().map(|r| (r * 255.0) as u8);
+
+        Rgba([r, g, b, 255])
+    } else {
+        mat.pbr_metallic_roughness()
+            .base_color_factor()
+            .map(|r| (r * 255.0) as u8)
+            .into()
+    };
 
     let texturing = get_material_texture_data(mat, image_data)?;
 
@@ -173,6 +180,7 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
         texturing,
         alpha_threshold,
         base_color,
+        emissive,
     })
 }
 
@@ -364,7 +372,7 @@ fn import_gltf(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &Path, scale: f32) -> Result<Scene> {
+pub fn load_gltf(path: &Path, scale: f32, rotate_into_z_up: bool) -> Result<Scene> {
     let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
     let mut materials = document
@@ -378,10 +386,15 @@ pub fn load_gltf(path: &Path, scale: f32) -> Result<Scene> {
         texturing: None,
         alpha_threshold: None,
         base_color: Rgba([255, 255, 255, 255]),
+        emissive: false,
     });
 
-    // we need to rotate 90* to rotate from Y-up (GLTF) into Z-up (.vox)
-    let root_transform = Mat4::from_rotation_x(FRAC_PI_2) * Mat4::from_scale(Vec3::splat(scale));
+    let root_transform = if rotate_into_z_up {
+        // we need to rotate 90* to rotate from Y-up (GLTF) into Z-up (.vox)
+        Mat4::from_rotation_x(FRAC_PI_2) * Mat4::from_scale(Vec3::splat(scale))
+    } else {
+        Mat4::from_scale(Vec3::splat(scale))
+    };
 
     let mut instances = Vec::new();
     for scene in document.scenes() {

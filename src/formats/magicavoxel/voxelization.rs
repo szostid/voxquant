@@ -12,7 +12,6 @@ pub trait VoxelType: Clone + Copy + PartialEq + Eq + Send + Sync + 'static {
 }
 
 /// 256x256x256 Chunk of a magicavoxel model
-#[derive(Clone)]
 pub struct Chunk<T: VoxelType> {
     pub voxels: Vec<T>,
     pub origin: IVec3,
@@ -32,8 +31,6 @@ impl<T: VoxelType> Chunk<T> {
 
     #[profiling::function]
     pub fn optimize(&mut self) {
-        // i've found that sorting by the material index to ensure that during deduplication
-        // we prefer brighter colors over dark colors makes everything look much nicer
         self.voxels.sort_unstable_by_key(|v| {
             let pos = v.pos();
             u32::from_be_bytes([0, pos.z, pos.y, pos.x])
@@ -44,7 +41,7 @@ impl<T: VoxelType> Chunk<T> {
 }
 
 impl<T: VoxelType> VoxelStore for Chunk<T> {
-    fn add_voxel(&mut self, position: IVec3, color: Rgba<u8>) {
+    fn add_voxel(&mut self, position: IVec3, color: Rgba<u8>, _is_emissive: bool) {
         let pos_in_chunk = position - self.origin;
 
         if let Ok(local) = U8Vec3::try_from(pos_in_chunk) {

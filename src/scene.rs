@@ -6,7 +6,11 @@ use std::sync::Arc;
 pub struct Material {
     pub texturing: Option<MaterialTexturing>,
     pub alpha_threshold: Option<u8>,
+    /// The base color of the material. If the material is emissive,
+    /// this will be the color of its emissive texture.
     pub base_color: Rgba<u8>,
+    /// Whether the material is emissive
+    pub emissive: bool,
 }
 
 #[derive(Clone, Copy)]

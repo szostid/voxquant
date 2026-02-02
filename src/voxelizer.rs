@@ -6,7 +6,7 @@ use glam::{IVec3, Vec2, Vec3, Vec4};
 use std::ops::Range;
 
 pub trait VoxelStore {
-    fn add_voxel(&mut self, pos: IVec3, color: Rgba<u8>);
+    fn add_voxel(&mut self, pos: IVec3, color: Rgba<u8>, is_emissive: bool);
 }
 
 /// Voxelizes the edges of the provided `triangle`.
@@ -148,7 +148,7 @@ fn voxelize_triangle<T: VoxelStore>(
                 let color = shading.sample_from_bary(Vec3::new(a_bary, b_bary, c_bary));
 
                 if let Some(color) = color {
-                    store.add_voxel(voxel_pos, color);
+                    store.add_voxel(voxel_pos, color, shading.is_emissive());
                 }
             }
         }
@@ -187,7 +187,7 @@ fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3,
         let color = shading.snap_and_get_color(voxel_pos);
 
         if let Some(color) = color {
-            store.add_voxel(voxel_pos, color);
+            store.add_voxel(voxel_pos, color, shading.is_emissive());
         }
 
         if voxel_pos == end {
@@ -207,13 +207,13 @@ fn voxelize_points<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangl
     let [a, b, c] = triangle.vertices.map(|p| p.pos.as_ivec3());
 
     if let Some(color) = shading.sample_from_bary(Vec3::X) {
-        store.add_voxel(a, color)
+        store.add_voxel(a, color, shading.is_emissive())
     }
     if let Some(color) = shading.sample_from_bary(Vec3::Y) {
-        store.add_voxel(b, color)
+        store.add_voxel(b, color, shading.is_emissive())
     }
     if let Some(color) = shading.sample_from_bary(Vec3::Z) {
-        store.add_voxel(c, color)
+        store.add_voxel(c, color, shading.is_emissive())
     }
 }
 
@@ -255,11 +255,17 @@ struct TriangleData<'a> {
     precalc: geometry::TriangleInterpolator,
     vert_colors: [Rgba<u8>; 3],
     base_color: Rgba<u8>,
+    is_emissive: bool,
     texture: Option<TriangleTextureData<'a>>,
     alpha_threshold: Option<u8>,
 }
 
 impl TriangleData<'_> {
+    #[inline]
+    pub fn is_emissive(&self) -> bool {
+        self.is_emissive
+    }
+
     pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Rgba<u8>> {
         bary = bary.max(Vec3::ZERO);
 
@@ -368,6 +374,7 @@ pub fn voxelize_scene<T: VoxelStore>(
             texture,
             precalc: geometry::TriangleInterpolator::new(triangle),
             vert_colors: triangle.colors(),
+            is_emissive: material.emissive,
             base_color: material.base_color,
             alpha_threshold: material.alpha_threshold,
         };

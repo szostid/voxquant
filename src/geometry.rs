@@ -1,7 +1,7 @@
-use crate::*;
-
 use glam::{Vec2, Vec3};
 use std::ops::Index;
+
+pub use image::Rgba;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Vertex {
