@@ -23,6 +23,7 @@ pub fn voxelize_and_save(scene: Scene, args: &Args) -> Result<()> {
             let t3 = Instant::now();
             println!("Scene saved in {}s", (t3 - t2).as_secs_f32());
         }
+        #[cfg(feature = "dynamic_palette")]
         ColorMode::Dynamic => {
             let t1 = Instant::now();
             let data = voxelization::voxelize(&scene, args.res, args.mode, !args.no_optimization);

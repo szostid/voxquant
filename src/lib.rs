@@ -43,6 +43,7 @@ impl Display for VoxelizationMode {
 pub enum ColorMode {
     #[value(name = "static")]
     Static,
+    #[cfg(feature = "dynamic_palette")]
     #[value(name = "dynamic")]
     Dynamic,
 }
@@ -51,6 +52,7 @@ impl Display for ColorMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Static => f.write_str("static"),
+            #[cfg(feature = "dynamic_palette")]
             Self::Dynamic => f.write_str("dynamic"),
         }
     }
@@ -155,7 +157,11 @@ pub struct Args {
 
     /// The palette generation mode. Dynamic palette looks
     /// much better, but the static palette is much faster.
-    #[arg(long, default_value_t = ColorMode::Dynamic)]
+    ///
+    /// Dynamic palette is only enabled if the feature `dynamic_palette`
+    /// is enabled (enabled by default)
+    #[cfg_attr(feature = "dynamic_palette", arg(long, default_value_t = ColorMode::Dynamic))]
+    #[cfg_attr(not(feature = "dynamic_palette"), arg(long, default_value_t = ColorMode::Static))]
     pub color: ColorMode,
 
     /// With this option, if two triangles share a voxel,

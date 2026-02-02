@@ -85,6 +85,7 @@ fn decode_color(byte: u8) -> [u8; 4] {
 }
 
 #[profiling::function]
+#[cfg(feature = "dynamic_palette")]
 fn quantize_colors(chunks: Vec<Chunk<VoxelWithColor>>) -> (Vec<Model>, Vec<IVec3>, Vec<Color>) {
     use quantette::{ImageRef, PaletteSize, Pipeline, QuantizeMethod, deps::palette::rgb::Rgb};
     use rayon::prelude::*;
@@ -172,6 +173,7 @@ fn quantize_colors(chunks: Vec<Chunk<VoxelWithColor>>) -> (Vec<Model>, Vec<IVec3
     (models, origins, palette)
 }
 
+#[cfg(feature = "dynamic_palette")]
 #[profiling::function]
 #[expect(
     clippy::default_trait_access,
