@@ -9,7 +9,9 @@
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, ValueEnum};
+use glam::{Mat4, Vec3};
 use image::{Rgba, RgbaImage};
+use std::f32::consts::FRAC_PI_2;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -117,12 +119,17 @@ pub fn voxelize(args: &Args) -> Result<()> {
     let t0 = Instant::now();
 
     let scene = match input_type {
-        InputType::GlbGltf => formats::gltf2::load_gltf(
-            &args.input,
-            args.base_scale,
-            output_type == OutputType::MagicaVoxel,
-        )
-        .context("failed to load the input file")?,
+        InputType::GlbGltf => {
+            let root_transform = if output_type == OutputType::MagicaVoxel {
+                // we need to rotate 90* to rotate from Y-up (GLTF) into Z-up (.vox)
+                Mat4::from_rotation_x(FRAC_PI_2) * Mat4::from_scale(Vec3::splat(args.base_scale))
+            } else {
+                Mat4::from_scale(Vec3::splat(args.base_scale))
+            };
+
+            formats::gltf2::load_gltf(&args.input, root_transform)
+                .context("failed to load the input file")?
+        }
     };
 
     let t1 = Instant::now();
