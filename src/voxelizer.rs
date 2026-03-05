@@ -11,10 +11,15 @@ pub trait VoxelStore {
 
 /// Voxelizes the edges of the provided `triangle`.
 #[inline]
-fn voxelize_wireframe<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangle: Triangle) {
-    voxelize_line(store, shading, triangle[0], triangle[1]);
-    voxelize_line(store, shading, triangle[1], triangle[2]);
-    voxelize_line(store, shading, triangle[0], triangle[2]);
+fn voxelize_wireframe<T: VoxelStore>(
+    store: &mut T,
+    shading: &TriangleData,
+    triangle: Triangle,
+    range: Range<IVec3>,
+) {
+    voxelize_line(store, shading, triangle[0], triangle[1], range.clone());
+    voxelize_line(store, shading, triangle[1], triangle[2], range.clone());
+    voxelize_line(store, shading, triangle[0], triangle[2], range);
 }
 
 /// Voxelizes the provided `triangle`.
@@ -59,6 +64,11 @@ fn voxelize_triangle<T: VoxelStore>(
     // original triangle to determine the third (so-called depth) coordinate
     // of the point. then we can derive the original coordinates of the point
     // and append it to the store.
+    const EPSILON: f32 = -0.001;
+
+    // conservative rasterization
+    voxelize_wireframe(store, shading, triangle, range.clone());
+
     let normal = shading.precalc.normal();
 
     let d_axis = normal.abs().max_position();
@@ -92,30 +102,6 @@ fn voxelize_triangle<T: VoxelStore>(
     let min = a.min(b).min(c).floor().as_ivec2();
     let max = a.max(b).max(c).ceil().as_ivec2();
 
-    {
-        let bbox_size = max - min;
-        let bbox_area = bbox_size.x * bbox_size.y;
-
-        let is_tiny = bbox_size.x <= 2 || bbox_size.y <= 2;
-
-        // we consider the triangle to be a thin string whenever
-        // the area of the triangle within the bounding box is
-        // much smaller than the area of the triangle (that is,
-        // the triangle takes up very little of the space within
-        // the bounding box)
-        //
-        // NOTE: no need to handle near-zero bbox_area because then
-        // `is_tiny` will be true and we will voxelize as wifeframe
-        // anyways
-        let density = area.abs() / bbox_area as f32;
-        let is_string = density < 0.05;
-
-        if is_tiny || is_string {
-            voxelize_wireframe(store, shading, triangle);
-            return;
-        }
-    }
-
     let u_start = min.x.max(range.start[u_axis]);
     let u_end = max.x.min(range.end[u_axis]);
     let v_start = min.y.max(range.start[v_axis]);
@@ -130,7 +116,7 @@ fn voxelize_triangle<T: VoxelStore>(
             let b_bary = ap.perp_dot(ac) * area_inv; // area of APC / area of ABC
             let a_bary = 1.0 - c_bary - b_bary;
 
-            if a_bary >= 0.0 && b_bary >= 0.0 && c_bary >= 0.0 {
+            if a_bary >= EPSILON && b_bary >= EPSILON && c_bary >= EPSILON {
                 // we need to find the depth. we solve the equation of the plane defined by the
                 // triangle to find the `d` (third/z) coordinate of a point `P` that lies on it:
                 // N dot P = D
@@ -157,13 +143,18 @@ fn voxelize_triangle<T: VoxelStore>(
 
 /// Voxelizes a line going from `p1` to `p2` with the provided shading using a DDA algorythm
 #[inline]
-fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3, p2: Vec3) {
+fn voxelize_line<T: VoxelStore>(
+    store: &mut T,
+    shading: &TriangleData,
+    p1: Vec3,
+    p2: Vec3,
+    range: Range<IVec3>,
+) {
     let end = p2.as_ivec3();
     let ray_pos = p1;
 
-    if p1 == p2 {
-        return;
-    }
+    let box_min = range.start.as_vec3();
+    let box_max = range.end.as_vec3();
 
     let ray_dir = (p2 - p1).normalize();
 
@@ -172,6 +163,34 @@ fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3,
     }
 
     let inv_dir = Vec3::ONE / ray_dir;
+
+    let mut t_entry = 0.0_f32;
+    let mut t_exit = 1.0_f32;
+
+    for i in 0..3 {
+        // line is parallel and its outside of the bounding box
+        if ray_dir[i].abs() < f32::EPSILON && p1[i] < box_min[i] || p1[i] > box_max[i] {
+            return;
+        }
+
+        let t0 = (box_min[i] - p1[i]) * inv_dir[i];
+        let t1 = (box_max[i] - p1[i]) * inv_dir[i];
+
+        let (t_near, t_far) = if inv_dir[i] < 0.0 { (t1, t0) } else { (t0, t1) };
+
+        t_entry = t_entry.max(t_near);
+        t_exit = t_exit.min(t_far);
+    }
+
+    if t_entry > t_exit {
+        return;
+    }
+
+    if p1 == p2 {
+        return;
+    }
+
+    let limit = t_exit + 0.01;
 
     let mut voxel_pos = ray_pos.floor().as_ivec3();
 
@@ -183,7 +202,10 @@ fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3,
 
     let mut t_max = (next_pos - ray_pos) * inv_dir;
 
-    loop {
+    // safety bound
+    let max_steps = (t_exit - t_entry) as u32 * 10;
+
+    for _ in 0..max_steps {
         let color = shading.snap_and_get_color(voxel_pos);
 
         if let Some(color) = color {
@@ -195,6 +217,10 @@ fn voxelize_line<T: VoxelStore>(store: &mut T, shading: &TriangleData, p1: Vec3,
         }
 
         let smallest = t_max.min_position();
+
+        if t_max[smallest] > limit {
+            break;
+        }
 
         t_max[smallest] += t_delta[smallest];
         voxel_pos[smallest] += step[smallest];
@@ -383,7 +409,9 @@ pub fn voxelize_scene<T: VoxelStore>(
             VoxelizationMode::Triangles => {
                 voxelize_triangle(store, &shading, triangle, input.range.clone());
             }
-            VoxelizationMode::Wireframe => voxelize_wireframe(store, &shading, triangle),
+            VoxelizationMode::Wireframe => {
+                voxelize_wireframe(store, &shading, triangle, input.range.clone())
+            }
             VoxelizationMode::Points => voxelize_points(store, &shading, triangle),
         }
     });

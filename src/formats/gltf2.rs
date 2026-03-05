@@ -3,7 +3,6 @@ use geometry::{BoundingBox, Triangle, Vertex};
 use scene::{Material, MaterialTexturing, Scene, WrapMode};
 
 use glam::{Mat4, Vec2, Vec3};
-use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
 struct MeshInstance<'a> {
@@ -372,7 +371,7 @@ fn import_gltf(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &Path, scale: f32, rotate_into_z_up: bool) -> Result<Scene> {
+pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
     let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
     let mut materials = document
@@ -388,13 +387,6 @@ pub fn load_gltf(path: &Path, scale: f32, rotate_into_z_up: bool) -> Result<Scen
         base_color: Rgba([255, 255, 255, 255]),
         emissive: false,
     });
-
-    let root_transform = if rotate_into_z_up {
-        // we need to rotate 90* to rotate from Y-up (GLTF) into Z-up (.vox)
-        Mat4::from_rotation_x(FRAC_PI_2) * Mat4::from_scale(Vec3::splat(scale))
-    } else {
-        Mat4::from_scale(Vec3::splat(scale))
-    };
 
     let mut instances = Vec::new();
     for scene in document.scenes() {
