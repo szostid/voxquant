@@ -1,5 +1,4 @@
 use crate::voxelization::{Chunk, VoxelType};
-
 use anyhow::Result;
 use dot_vox::{Color, Model, Voxel};
 use glam::{IVec3, U8Vec3};

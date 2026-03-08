@@ -23,3 +23,6 @@ bytemuck.workspace = true
 profiling.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
+
+[lints]
+workspace = true

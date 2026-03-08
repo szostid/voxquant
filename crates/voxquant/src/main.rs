@@ -1,3 +1,6 @@
+//! A CLI tool for converting triangles into meshes built on [`voxquant_core`].
+//!
+//! The tool supports (glTF 2.0)[`voxquant_gltf`] and (Magicavoxel)[`voxquant_dotvox`].
 use anyhow::{Context as _, Result, bail};
 use clap::Parser;
 use std::path::{Path, PathBuf};
@@ -14,7 +17,7 @@ fn get_extension(path: &Path) -> Result<&str> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum InputType {
+enum InputType {
     GlbGltf,
 }
 
@@ -35,7 +38,7 @@ impl InputType {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum OutputType {
+enum OutputType {
     MagicaVoxel,
 }
 
@@ -57,7 +60,7 @@ impl OutputType {
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-pub struct CliConfig {
+struct CliConfig {
     #[arg(short, long)]
     pub input: PathBuf,
 
@@ -71,7 +74,7 @@ pub struct CliConfig {
     pub dotvox_cfg: DotVoxConfig,
 }
 
-pub fn main() -> Result<()> {
+fn main() -> Result<()> {
     let config = CliConfig::parse();
 
     let input_format = InputType::from_file(&config.input)?;

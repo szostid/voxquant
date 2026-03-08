@@ -1,13 +1,4 @@
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![warn(clippy::cargo)]
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_lossless,
-    clippy::cast_precision_loss
-)]
-
+//! `glTF 2.0` input support for [`voxquant_core`] through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
 use anyhow::{Context as _, Result};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use image::{Rgba, RgbaImage};
@@ -155,6 +146,11 @@ fn get_material_texture_data(
 }
 
 #[profiling::function]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "intentionally quantized to 8-bit RGB"
+)]
 fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result<Material> {
     let alpha_threshold = match mat.alpha_mode() {
         gltf::material::AlphaMode::Opaque => None,
@@ -202,6 +198,10 @@ struct MeshScratch {
 }
 
 #[profiling::function]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "safe to assume that neither material indices or triangle indices will be larger than usize"
+)]
 fn parse_mesh_instance(
     instance: MeshInstance,
     bounds: &mut BoundingBox,
@@ -214,7 +214,7 @@ fn parse_mesh_instance(
         [i1, i2, i3]: [u32; 3],
         triangles: &mut Vec<Triangle>,
         scratch: &MeshScratch,
-        material_idx: u32,
+        material_index: u32,
     ) {
         let i1 = i1 as usize;
         let i2 = i2 as usize;
@@ -246,7 +246,7 @@ fn parse_mesh_instance(
                     scratch.colors.get(i3).copied(),
                 ),
             ],
-            material_index: material_idx,
+            material_index,
         });
     }
 
@@ -418,7 +418,7 @@ fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
         .sum();
 
     let mut triangles = Vec::with_capacity(total_triangles);
-    let mut bounds = BoundingBox::zero();
+    let mut bounds = BoundingBox::empty();
 
     let mut scratch = MeshScratch::default();
 
@@ -442,6 +442,7 @@ fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
     })
 }
 
+/// The definition of the input format.
 pub struct Gltf;
 
 impl Format for Gltf {

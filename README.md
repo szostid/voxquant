@@ -3,7 +3,7 @@ A crate and a command line utility for voxelizing triangle meshes.
 
 The crate structure is made out of the following crates:
 - `voxquant_core` provides the core voxelization algorithms and types for input/output formats to use.
-- `voxquant_gltf` provides the GLTF 2.0 support through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
+- `voxquant_gltf` provides the glTF 2.0 support through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
   - The loading is parallelized (image loading to be exact). Most of the features are supported. The only missing features that could be useful are skinning, morph targets and texture transforms.
 - `voxquant_dotvox` provides magicavoxel support through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
   - The voxelization is parallelized. You can use a dynamic or a static palette.

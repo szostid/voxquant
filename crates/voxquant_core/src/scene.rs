@@ -1,9 +1,34 @@
+//! In-memory representation of the [`Scene`].
 use crate::geometry::{BoundingBox, Triangle};
 use image::{Rgba, RgbaImage};
 use std::sync::Arc;
 
+/// A complete 3D scene with all the data required for voxelization.
+pub struct Scene {
+    /// All triangles contained within all instances of models of the scene.
+    ///
+    /// The scene does not distinguish models. If you have a model
+    /// with multiple instances, you should just expand them all
+    /// into different triangles.
+    pub triangles: Vec<Triangle>,
+    /// All materials contained within the scene
+    pub materials: Vec<Material>,
+    /// The bounding box of all triangles within the scene.
+    ///
+    /// During voxelization, the voxels (which should all be positioned
+    /// within the bounding box of the scene) will be translated so
+    /// that instead of starting at [`min`](BoundingBox::min) and ending at
+    /// [`max`](BoundingBox::max), they will start at `0, 0, 0` and end at
+    /// [`size`](BoundingBox::size) instead.
+    pub bounds: BoundingBox,
+}
+
+/// Determines how a mesh's color and emission are rendered.
 pub struct Material {
+    /// Data about the albedo texture of the material
     pub texturing: Option<MaterialTexturing>,
+    /// The color alpha threshold below which any voxels should be
+    /// discarded. If not present, no discarding will happen.
     pub alpha_threshold: Option<u8>,
     /// The base color of the material. If the material is emissive,
     /// this will be the color of its emissive texture.
@@ -12,14 +37,29 @@ pub struct Material {
     pub emissive: bool,
 }
 
+/// Data about the albedo texture of the material
+pub struct MaterialTexturing {
+    /// The actual texture
+    pub texture: Arc<RgbaImage>,
+    pub tex_coords: u32,
+    /// Wrap modes for `u, v` respectively
+    pub wrap_mode: [WrapMode; 2],
+}
+
+/// Wrap mode of a texture
 #[derive(Clone, Copy)]
 pub enum WrapMode {
+    /// Clamps every texture coordinates into the `[0, 1]` range.
     ClampToEdge = 1,
+    /// Repeats the texture if UVs go out of the `[0, 1]` range,
+    /// but mirrors it.
     MirroredRepeat,
+    /// Repeats the texture if UVs go out of the `[0, 1]` range
     Repeat,
 }
 
 impl WrapMode {
+    /// Applies the wrap mode onto a single coordinate `c`
     #[inline]
     #[must_use]
     pub fn apply(self, c: f32) -> f32 {
@@ -34,16 +74,4 @@ impl WrapMode {
             }
         }
     }
-}
-
-pub struct MaterialTexturing {
-    pub texture: Arc<RgbaImage>,
-    pub tex_coords: u32,
-    pub wrap_mode: [WrapMode; 2],
-}
-
-pub struct Scene {
-    pub triangles: Vec<Triangle>,
-    pub materials: Vec<Material>,
-    pub bounds: BoundingBox,
 }

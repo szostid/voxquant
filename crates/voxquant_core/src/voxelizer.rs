@@ -1,3 +1,4 @@
+//! Core voxelization algorithms and storage traits.
 use crate::geometry::{Triangle, TriangleInterpolator};
 use crate::scene::{Scene, WrapMode};
 use clap::ValueEnum;
@@ -6,12 +7,16 @@ use image::{Rgba, RgbaImage};
 use std::fmt;
 use std::ops::Range;
 
+/// Determines the topological style of the generated voxels.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum VoxelizationMode {
+    /// Voxelizes the whole triangle
     #[value(name = "triangles")]
     Triangles,
+    /// Voxelizes only the wireframe of a triangle
     #[value(name = "wireframe")]
     Wireframe,
+    /// Voxelizes only the three vertices of a triangle
     #[value(name = "points")]
     Points,
 }
@@ -26,7 +31,16 @@ impl fmt::Display for VoxelizationMode {
     }
 }
 
+/// A sink for generated voxel data.
+///
+/// Implement this trait to define how and where voxel output is stored.
 pub trait VoxelStore {
+    /// Appends a voxel at `pos` with a `color` to the storage.
+    ///
+    /// The function won't be called if a voxel is discarded because of the alpha
+    /// threshold. The provided position is the global position (i.e. the `0,0,0`
+    /// is the `min` position of the AABB of the scene) and not a position within
+    /// the slice of the voxelized scene.
     fn add_voxel(&mut self, pos: IVec3, color: Rgba<u8>, is_emissive: bool);
 }
 
@@ -61,29 +75,29 @@ fn voxelize_triangle<T: VoxelStore>(
     //
     // Detailed description:
     //
-    // we pick the plane as the axis-aligned plane on which the
+    // We pick the plane as the axis-aligned plane on which the
     // triangle will take up the most area. the axis of the normal
     // of that plane is called `d` here. the two other axes are `u, v`
     //
-    // we project the points onto that plane, creating a new 2D triangle
+    // We project the points onto that plane, creating a new 2D triangle
     // made up of the points `a, b, c`.
     //
-    // if that triangle is very small, or very string-like, then the DDA
-    // loop will likely produce incomplete results (because of aliasing,
-    // similar to fences in some antialiasing implementations) because it
-    // will miss too many voxels. in that case, we just voxelize the edges
-    // of the triangles as lines and skip the normal voxelization loop.
+    // If that triangle is very small, or very string-like, then the loop
+    // will likely produce incomplete results (because of aliasing - similar
+    // to fences in games without antialiasing) because it will miss too
+    // many voxels, so we do a conservative rasterization by voxelizing
+    // the wireframe of the triangle too.
     //
-    // the rest of the algorythm consists of finding the bounds of this
-    // 2D triangle and iterating over their bounding box. for every
+    // The rest of the algorythm consists of finding the bounds of this
+    // 2D triangle and iterating over their bounding box - for every
     // picked point we find its barycentric coordinates and determine
     // if it is within the triangle.
     //
-    // if a picked point lies within the triangle, we need to solve the
+    // If a picked point lies within the triangle, we need to solve the
     // equation for a point that would lie on the plane defined by the
     // original triangle to determine the third (so-called depth) coordinate
-    // of the point. then we can derive the original coordinates of the point
-    // and append it to the store.
+    // of the point, and then we can derive the original coordinates of
+    // the point and append it to the store.
     const EPSILON: f32 = -0.001;
 
     // conservative rasterization
@@ -367,24 +381,33 @@ impl TriangleData<'_> {
     }
 }
 
+/// A part of the scene.
 pub struct SceneSlice<'a> {
-    pub mesh: &'a Scene,
+    /// The original, whole scene
+    pub scene: &'a Scene,
+    /// The voxel range (in the scene's bounds!) that the scene
+    /// spans over. Note that if you don't provide actual
+    /// [`indices`](Self::indices) the voxelizer will still visit
+    /// every triangle and discard most of it.
     pub range: Range<IVec3>,
+    /// The indices which the voxelizer should voxelize. Even if
+    /// a triangle falls within the [`range`](Self::range), the
+    /// voxelizer won't touch it. If no indices are provided,
+    /// the voxelizer will visit every triangle in the scene, and
+    /// discard most (if not all) of it.
     pub indices: Option<&'a [usize]>,
 }
 
 impl SceneSlice<'_> {
-    pub fn for_each_triangle(&self, mut op: impl FnMut(Triangle)) {
+    fn for_each_triangle(&self, mut op: impl FnMut(Triangle)) {
         match self.indices {
             Some(indices) => {
                 for &idx in indices {
-                    // Direct indexing branch
-                    op(self.mesh.triangles[idx]);
+                    op(self.scene.triangles[idx]);
                 }
             }
             None => {
-                for &tri in &self.mesh.triangles {
-                    // Contiguous slice branch
+                for &tri in &self.scene.triangles {
                     op(tri);
                 }
             }
@@ -392,6 +415,7 @@ impl SceneSlice<'_> {
     }
 }
 
+/// Voxelizes a slice of a scene using the provided settings.
 #[profiling::function]
 pub fn voxelize_scene<T: VoxelStore>(
     store: &mut T,
@@ -399,21 +423,21 @@ pub fn voxelize_scene<T: VoxelStore>(
     mode: VoxelizationMode,
     size: u32,
 ) {
-    let largest_dim = input.mesh.bounds.size().max_element();
+    let largest_dim = input.scene.bounds.size().max_element();
     let scale = size as f32 / largest_dim;
 
     input.for_each_triangle(|mut triangle| {
         for vertex in &mut triangle.vertices {
-            vertex.pos = (vertex.pos - input.mesh.bounds.min) * scale;
+            vertex.pos = (vertex.pos - input.scene.bounds.min) * scale;
         }
 
         let mat_id = triangle.material_index;
 
         let material = input
-            .mesh
+            .scene
             .materials
             .get(mat_id as usize)
-            .unwrap_or(&input.mesh.materials[0]);
+            .unwrap_or(&input.scene.materials[0]);
 
         let texture = material.texturing.as_ref().map(|data| TriangleTextureData {
             texture: &data.texture,

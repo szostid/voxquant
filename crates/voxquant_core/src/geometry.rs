@@ -1,17 +1,26 @@
+//! Geometric primitives and basic math for voxelization.
 use glam::{Vec2, Vec3};
+use image::Rgba;
 use std::ops::Index;
 
-pub use image::Rgba;
-
+/// A vertex with some associated color and UV (if present) data.
 #[derive(Debug, Clone, Copy)]
 pub struct Vertex {
+    /// Position of the vertex.
+    ///
+    /// The exact origin of the vertex space is unspecified.
+    /// It will be translated by the voxelizer based on
+    /// the [`BoundingBox`] of the scene.
     pub pos: Vec3,
+    /// The base color of the vertex. If a texture is
+    /// present, its color will be tinted by this field.
     pub color: Rgba<u8>,
     /// [`Vec2::NAN`] if UV's not present
     uv: Vec2,
 }
 
 impl Vertex {
+    /// Creates a new vertex
     #[inline]
     #[must_use]
     pub fn new(pos: Vec3, uv: Option<Vec2>, color: Option<Rgba<u8>>) -> Self {
@@ -22,6 +31,8 @@ impl Vertex {
         }
     }
 
+    /// Returns the UV coordinates of this vertex, if they were provided
+    /// when the vertex was created.
     #[inline]
     #[must_use]
     pub fn uv(&self) -> Option<Vec2> {
@@ -32,12 +43,18 @@ impl Vertex {
 /// Triangle, defined by three vertices and a material that it uses.
 #[derive(Clone, Copy)]
 pub struct Triangle {
+    /// The vertices of the triangle. Named `a, b, c` respectively
+    /// in many parts of the code
     pub vertices: [Vertex; 3],
+    /// The material used by this triangle. This is
+    /// an index into the scene's materials
     pub material_index: u32,
 }
 
 impl Triangle {
-    /// Returns the UV coordinates of the three vertices, if present
+    /// Returns the UV coordinates of the three vertices `a, b, c`,
+    /// if ALL are present (and they should be either all present
+    /// or all absent)
     #[inline]
     #[must_use]
     pub fn uvs(&self) -> Option<[Vec2; 3]> {
@@ -67,35 +84,58 @@ impl Index<usize> for Triangle {
     }
 }
 
+/// The bounding box of a scene.
+///
+/// During voxelization, the voxels (which should all be positioned within
+/// the bounding box of the scene) will be translated so that instead of
+/// starting at [`min`](Self::min) and ending at [`max`](Self::max), they
+/// will start at `0, 0, 0` and end at [`size`](Self::size) instead.
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
+    /// The smallest (minimum) point of the bounding box
     pub min: Vec3,
+    /// The largest (maximum) point of the bounding box
     pub max: Vec3,
 }
 
 impl BoundingBox {
+    /// Creates an empty bounding box with no volume.
     #[inline]
     #[must_use]
-    pub const fn zero() -> Self {
+    pub const fn empty() -> Self {
         Self {
             min: Vec3::MAX,
             max: Vec3::MIN,
         }
     }
 
+    /// Returns true if no points have been added to this box.
     #[inline]
-    pub fn extend(&mut self, pos: Vec3) {
-        self.min = self.min.min(pos);
-        self.max = self.max.max(pos);
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.min.x > self.max.x || self.min.y > self.max.y || self.min.z > self.max.z
     }
 
+    /// Extends the bounding box so that it contains the point `p`
+    #[inline]
+    pub fn extend(&mut self, p: Vec3) {
+        self.min = self.min.min(p);
+        self.max = self.max.max(p);
+    }
+
+    /// Returns the size of the bounding box (i.e. `max - min`).
+    ///
+    /// If the bounding box is [`empty`](Self::empty), returns [`Vec3::ZERO`]
     #[inline]
     #[must_use]
     pub fn size(&self) -> Vec3 {
-        self.max - self.min
+        (self.max - self.min).max(Vec3::ZERO)
     }
 }
 
+/// Computes barycentric coordinates for points on a triangle's surface.
+///
+/// Used to interpolate UVs, normals, and colors across a triangle.
 #[derive(Debug, Clone, Copy)]
 pub struct TriangleInterpolator {
     /// `a`
@@ -106,11 +146,11 @@ pub struct TriangleInterpolator {
     /// `c - a`
     v1: Vec3,
 
-    /// `v0 * v0`
+    /// `(b - a)^2`
     d00: f32,
-    /// `v0 * v1`
+    /// `(b - a)(c - a)`
     d01: f32,
-    /// `v1 * v1`
+    /// `(c - a)^2`
     d11: f32,
 
     /// Inverse determinant for Cramer's rule
@@ -118,6 +158,9 @@ pub struct TriangleInterpolator {
 }
 
 impl TriangleInterpolator {
+    /// Creates a new interpolator. If the triangle
+    /// has no area, the interpolator will return
+    /// barycentric coordinates of point `a`
     #[inline]
     #[must_use]
     #[expect(clippy::suspicious_operation_groupings, reason = "???")]
@@ -152,12 +195,15 @@ impl TriangleInterpolator {
         }
     }
 
+    /// Returns the normal to the surface of the triangle.
     #[inline]
     #[must_use]
     pub fn normal(&self) -> Vec3 {
         self.v0.cross(self.v1)
     }
 
+    /// Given a point `p`, returns the barycentric coordinates
+    /// of that point's projection onto the triangle
     #[inline]
     #[must_use]
     #[expect(

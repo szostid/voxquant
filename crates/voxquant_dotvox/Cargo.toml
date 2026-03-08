@@ -16,7 +16,6 @@ voxquant_core.workspace = true
 clap.workspace = true
 glam.workspace = true
 image.workspace = true
-bytemuck.workspace = true
 profiling.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
@@ -25,3 +24,6 @@ quantette = { workspace = true, optional = true }
 [features]
 default = ["dynamic_palette"]
 dynamic_palette = ["dep:quantette"]
+
+[lints]
+workspace = true

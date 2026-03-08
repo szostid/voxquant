@@ -27,3 +27,18 @@ bytemuck = "1.24"
 anyhow = "1.0"
 rayon = "1.11"
 profiling = "1.0"
+
+[workspace.lints.clippy]
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+# there's a lot of quantization that has to be done here 
+# so generally these are OK to ignore
+cast_possible_truncation = { level = "allow", priority = 1 }
+cast_sign_loss = { level = "allow", priority = 1 }
+cast_lossless = { level = "allow", priority = 1 }
+cast_precision_loss = { level = "allow", priority = 1 }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unused_crate_dependencies = "warn"

@@ -14,12 +14,8 @@ repository.workspace = true
 image = { workspace = true, default-features = false }
 clap = { workspace = true, features = ["derive"] }
 glam = { workspace = true, features = ["bytemuck"] }
-quantette = { workspace = true, optional = true }
-bytemuck.workspace = true
 anyhow.workspace = true
-rayon.workspace = true
 profiling.workspace = true
 
-[features]
-default = ["dynamic_palette"]
-dynamic_palette = ["dep:quantette"]
+[lints]
+workspace = true

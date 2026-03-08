@@ -1,13 +1,4 @@
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![warn(clippy::cargo)]
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_lossless,
-    clippy::cast_precision_loss
-)]
-
+//! `MagicaVoxel` support for [`voxquant_core`] through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
 use anyhow::Result;
 use clap::{Args, ValueEnum};
 use glam::{Mat4, Vec4};
@@ -18,10 +9,17 @@ use voxquant_core::{Format, OutputFormat, VoxelizationConfig, scene::Scene};
 mod serialization;
 mod voxelization;
 
+/// Determines the algorithm that assigns color indices to
+/// generated voxel colors.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum ColorMode {
+    /// The palette will be static, it will use the default palette defined
+    /// by this crate (NOT the default magicavoxel palette!)
     #[value(name = "static")]
     Static,
+    /// The palette will be determined using the colors present within the
+    /// generated model. A quantization algorithm will assign colors to
+    /// make the output file colors as accurate as possible
     #[cfg(feature = "dynamic_palette")]
     #[value(name = "dynamic")]
     Dynamic,
@@ -78,7 +76,9 @@ fn voxelize_and_save(
     Ok(())
 }
 
+/// Config for the [`DotVox`] voxelizer.
 #[derive(Debug, Args)]
+#[command(next_help_heading = "`.vox` format options")]
 pub struct DotVoxConfig {
     /// The palette generation mode. Dynamic palette looks
     /// much better, but the static palette is much faster.
@@ -96,6 +96,7 @@ pub struct DotVoxConfig {
     pub no_optimization: bool,
 }
 
+/// The definition of the output format.
 pub struct DotVox;
 
 impl Format for DotVox {

@@ -1,7 +1,15 @@
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![warn(clippy::cargo)]
-#![allow(
+//! Format-agnostic voxelization library
+//!
+//! This provides only the core algorithms for describing and voxelizing scenes. The voxelizer needs an actual
+//! implementation for a voxel storage ([`VoxelStore`](voxelizer::VoxelStore)) and it needs to be provided with
+//! a slice of scene to voxelize ([`SceneSlice`](voxelizer::SceneSlice)) - the primary way of mutltithreading
+//! voxelization is voxelizing in slices of the scene in chunks, and then composing the data into a whole scene.
+//! For instance, `MagicaVoxel` requires chunks of 256^3 at most anyways, so that's the perfect place to
+//! multithread the voxelization.
+//!
+//! Built for the [`voxquant`](https://docs.rs/voxquant/latest/voxquant/) CLI, but they can be used anywhere.
+//! You can implement and use custom [`InputFormat`]s and [`OutputFormat`]s.
+#![expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_lossless,
@@ -19,7 +27,9 @@ pub mod geometry;
 pub mod scene;
 pub mod voxelizer;
 
+/// Configuration required by the voxelizer.
 #[derive(Args, Debug)]
+#[command(next_help_heading = "Voxelization options")]
 pub struct VoxelizationConfig {
     /// The resolution of the output model
     #[arg(short, long, default_value_t = 1024)]
@@ -36,14 +46,29 @@ pub struct VoxelizationConfig {
     pub mode: VoxelizationMode,
 }
 
+/// Base trait for supported 3D file formats.
 pub trait Format {
     /// The orthogonal basis matrix defining the format's coordinate system.
+    ///
+    /// You can translate from an input format's coordinate system into an output
+    /// format's coordinate system with the `output_basis.inverse() * input_basis`
+    /// matrix.
     const BASIS: Mat4;
 }
 
+/// Base trait for supported input file formats.
 pub trait InputFormat: Format {
+    /// The specific format config required by this format
     type Config;
 
+    /// Loads the scene from the file at `path` using this format.
+    ///
+    /// The scene will be transformed using the `transform_matrix`.
+    ///
+    /// # Errors
+    /// This depends on the exact implementation of the format. Usually
+    /// missing or malformed files or unsupported features will cause
+    /// erros.
     fn load(
         transform_matrix: Mat4,
         path: &Path,
@@ -52,9 +77,17 @@ pub trait InputFormat: Format {
     ) -> Result<Scene>;
 }
 
+/// Base trait for supported output file formats.
 pub trait OutputFormat: Format {
+    /// The specific format config required by this format
     type Config;
 
+    /// Voxelizes and saves the scene at `path` using this format.
+    ///
+    /// # Errors
+    /// This depends on the exact implementation of the format. Usually
+    /// missing or malformed files or unsupported features will cause
+    /// erros.
     fn voxelize_and_save(
         scene: Scene,
         path: &Path,
