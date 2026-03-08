@@ -7,7 +7,7 @@ use glam::{IVec3, U8Vec3};
 use std::num::NonZeroU8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct VoxelWithColor {
+pub struct VoxelWithColor {
     pub pos: U8Vec3,
     pub color: Rgba<u8>,
 }
@@ -52,9 +52,9 @@ const R_STEPS: u16 = 6;
 const G_STEPS: u16 = 7;
 const B_STEPS: u16 = 6;
 
-/// Maps an RGBA color to a palette index (1-253).
+/// Maps an RGBA color to a static palette index (1-253).
 /// Index 0 is reserved for 'Air' in `MagicaVoxel`, so we shift everything by +1.
-fn encode_color(color: [u8; 4]) -> u8 {
+const fn encode_color(color: [u8; 4]) -> u8 {
     let r = color[0] as u16;
     let g = color[1] as u16;
     let b = color[2] as u16;
@@ -65,16 +65,16 @@ fn encode_color(color: [u8; 4]) -> u8 {
 
     let packed = r_idx + (g_idx * R_STEPS) + (b_idx * R_STEPS * G_STEPS);
 
-    (packed + 1) as u8
+    packed as u8
 }
 
 /// Maps a palette index (1-253) back to an RGBA color.
-fn decode_color(byte: u8) -> [u8; 4] {
+const fn decode_color(byte: u8) -> [u8; 4] {
     if byte == 0 {
         return [0, 0, 0, 0];
     }
 
-    let val = (byte - 1) as u16;
+    let val = byte as u16;
 
     let r_idx = val % R_STEPS;
     let g_idx = (val / R_STEPS) % G_STEPS;
@@ -188,7 +188,7 @@ pub fn save_vox_dynamic(
     file_path: &Path,
     shift: IVec3,
 ) -> Result<()> {
-    use dot_vox::*;
+    use dot_vox::{DotVoxData, Frame, SceneNode, ShapeModel};
 
     let (models, origins, palette) = quantize_colors(chunks);
 
@@ -270,7 +270,7 @@ pub fn save_vox_static(
     file_path: &Path,
     shift: IVec3,
 ) -> Result<()> {
-    use dot_vox::*;
+    use dot_vox::{DotVoxData, Frame, SceneNode, ShapeModel, Size};
 
     // the palette starts at index 1 and ends later because magicavoxel only allows for 255
     // indices and reserves the first index for a black color. we can therefore skip the black

@@ -27,7 +27,6 @@ fn voxelize_wireframe<T: VoxelStore>(
 /// If the triangle is small, or string-like then this will instead fallback
 /// to wireframe voxelization.
 #[inline]
-#[expect(clippy::similar_names, reason = "`u` vs `v` is quite clear")]
 #[expect(clippy::suboptimal_flops, reason = "FMA makes the function unreadable")]
 fn voxelize_triangle<T: VoxelStore>(
     store: &mut T,
@@ -233,13 +232,13 @@ fn voxelize_points<T: VoxelStore>(store: &mut T, shading: &TriangleData, triangl
     let [a, b, c] = triangle.vertices.map(|p| p.pos.as_ivec3());
 
     if let Some(color) = shading.sample_from_bary(Vec3::X) {
-        store.add_voxel(a, color, shading.is_emissive())
+        store.add_voxel(a, color, shading.is_emissive());
     }
     if let Some(color) = shading.sample_from_bary(Vec3::Y) {
-        store.add_voxel(b, color, shading.is_emissive())
+        store.add_voxel(b, color, shading.is_emissive());
     }
     if let Some(color) = shading.sample_from_bary(Vec3::Z) {
-        store.add_voxel(c, color, shading.is_emissive())
+        store.add_voxel(c, color, shading.is_emissive());
     }
 }
 
@@ -288,10 +287,13 @@ struct TriangleData<'a> {
 
 impl TriangleData<'_> {
     #[inline]
-    pub fn is_emissive(&self) -> bool {
+    #[must_use]
+    pub const fn is_emissive(&self) -> bool {
         self.is_emissive
     }
 
+    #[inline]
+    #[must_use]
     pub fn sample_from_bary(&self, mut bary: Vec3) -> Option<Rgba<u8>> {
         bary = bary.max(Vec3::ZERO);
 
@@ -335,6 +337,8 @@ impl TriangleData<'_> {
         Some(color)
     }
 
+    #[inline]
+    #[must_use]
     pub fn snap_and_get_color(&self, pos: IVec3) -> Option<Rgba<u8>> {
         let bary = self.precalc.get_closest_barycentric(pos.as_vec3());
 
@@ -348,7 +352,7 @@ pub struct SceneSlice<'a> {
     pub indices: Option<&'a [usize]>,
 }
 
-impl<'a> SceneSlice<'a> {
+impl SceneSlice<'_> {
     pub fn for_each_triangle(&self, mut op: impl FnMut(Triangle)) {
         match self.indices {
             Some(indices) => {
@@ -410,9 +414,11 @@ pub fn voxelize_scene<T: VoxelStore>(
                 voxelize_triangle(store, &shading, triangle, input.range.clone());
             }
             VoxelizationMode::Wireframe => {
-                voxelize_wireframe(store, &shading, triangle, input.range.clone())
+                voxelize_wireframe(store, &shading, triangle, input.range.clone());
             }
-            VoxelizationMode::Points => voxelize_points(store, &shading, triangle),
+            VoxelizationMode::Points => {
+                voxelize_points(store, &shading, triangle);
+            }
         }
     });
 }

@@ -12,6 +12,8 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    #[inline]
+    #[must_use]
     pub fn new(pos: Vec3, uv: Option<Vec2>, color: Option<Rgba<u8>>) -> Self {
         Self {
             pos,
@@ -65,7 +67,6 @@ impl Index<usize> for Triangle {
     }
 }
 
-#[must_use]
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
     pub min: Vec3,
@@ -74,6 +75,7 @@ pub struct BoundingBox {
 
 impl BoundingBox {
     #[inline]
+    #[must_use]
     pub const fn zero() -> Self {
         Self {
             min: Vec3::MAX,
@@ -88,6 +90,7 @@ impl BoundingBox {
     }
 
     #[inline]
+    #[must_use]
     pub fn size(&self) -> Vec3 {
         self.max - self.min
     }
@@ -118,6 +121,10 @@ impl TriangleInterpolator {
     #[inline]
     #[must_use]
     #[expect(clippy::suspicious_operation_groupings, reason = "???")]
+    #[expect(
+        clippy::suboptimal_flops,
+        reason = "fma makes this unreadable, and it only influences precision, not performance"
+    )]
     pub fn new(tri: Triangle) -> Self {
         let v0 = tri[1] - tri[0];
         let v1 = tri[2] - tri[0];
@@ -153,6 +160,10 @@ impl TriangleInterpolator {
 
     #[inline]
     #[must_use]
+    #[expect(
+        clippy::suboptimal_flops,
+        reason = "fma makes this unreadable, and it only influences precision, not performance"
+    )]
     pub fn get_closest_barycentric(&self, p: Vec3) -> Vec3 {
         let v2 = p - self.a;
 

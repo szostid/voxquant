@@ -177,7 +177,7 @@ pub struct Args {
     /// much better, but the static palette is much faster.
     ///
     /// Dynamic palette is only enabled if the feature `dynamic_palette`
-    /// is enabled (enabled by default)
+    /// is enabled (the feature is enabled by default)
     #[cfg_attr(feature = "dynamic_palette", arg(long, default_value_t = ColorMode::Dynamic))]
     #[cfg_attr(not(feature = "dynamic_palette"), arg(long, default_value_t = ColorMode::Static))]
     pub color: ColorMode,

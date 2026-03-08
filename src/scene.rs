@@ -21,6 +21,8 @@ pub enum WrapMode {
 }
 
 impl WrapMode {
+    #[inline]
+    #[must_use]
     pub fn apply(self, c: f32) -> f32 {
         match self {
             Self::ClampToEdge => c.clamp(0.0, 1.0),

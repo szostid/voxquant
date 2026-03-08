@@ -11,7 +11,7 @@ struct MeshInstance<'a> {
 }
 
 fn collect_instances<'a>(
-    node: gltf::Node<'a>,
+    node: &gltf::Node<'a>,
     parent_transform: Mat4,
     instances: &mut Vec<MeshInstance<'a>>,
 ) {
@@ -27,7 +27,7 @@ fn collect_instances<'a>(
     }
 
     for child in node.children() {
-        collect_instances(child, global_transform, instances);
+        collect_instances(&child, global_transform, instances);
     }
 }
 
@@ -391,7 +391,7 @@ pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
     let mut instances = Vec::new();
     for scene in document.scenes() {
         for node in scene.nodes() {
-            collect_instances(node, root_transform, &mut instances);
+            collect_instances(&node, root_transform, &mut instances);
         }
     }
 
