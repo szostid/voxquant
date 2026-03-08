@@ -1,13 +1,16 @@
 # Voxquant
+<img src="examples/bistro4096_emissive.png" alt="example" align="right" width="50%"/>
+
 A crate and a command line utility for voxelizing triangle meshes.
+This is surface (triangle) only voxelization.
 
 The crate structure is made out of the following crates:
+- `voxquant` is the CLI tool that (currently) supports gltf -> magicavoxel conversion.
 - `voxquant_core` provides the core voxelization algorithms and types for input/output formats to use.
 - `voxquant_gltf` provides the glTF 2.0 support through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
   - The loading is parallelized (image loading to be exact). Most of the features are supported. The only missing features that could be useful are skinning, morph targets and texture transforms.
 - `voxquant_dotvox` provides magicavoxel support through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
   - The voxelization is parallelized. You can use a dynamic or a static palette.
-- `voxquant` is the CLI tool that (currently) supports gltf -> magicavoxel conversion.
 
 It is very easy to add support for more formats in the future / add your own formats (e.g. a direct octree output). Support for more formats may be added to the CLI tool in the future.
 
