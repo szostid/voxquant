@@ -1,8 +1,9 @@
-use crate::*;
-use geometry::Triangle;
-use scene::{Scene, WrapMode};
-
+use crate::geometry::{Triangle, TriangleInterpolator};
+use crate::scene::{Scene, WrapMode};
+use clap::ValueEnum;
 use glam::{IVec3, Vec2, Vec3, Vec4};
+use image::{Rgba, RgbaImage};
+use std::fmt;
 use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -15,8 +16,8 @@ pub enum VoxelizationMode {
     Points,
 }
 
-impl Display for VoxelizationMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for VoxelizationMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Triangles => f.write_str("triangles"),
             Self::Wireframe => f.write_str("wireframe"),
@@ -297,7 +298,7 @@ struct TriangleTextureData<'a> {
 }
 
 struct TriangleData<'a> {
-    precalc: geometry::TriangleInterpolator,
+    precalc: TriangleInterpolator,
     vert_colors: [Rgba<u8>; 3],
     base_color: Rgba<u8>,
     is_emissive: bool,
@@ -422,7 +423,7 @@ pub fn voxelize_scene<T: VoxelStore>(
 
         let shading = TriangleData {
             texture,
-            precalc: geometry::TriangleInterpolator::new(triangle),
+            precalc: TriangleInterpolator::new(triangle),
             vert_colors: triangle.colors(),
             is_emissive: material.emissive,
             base_color: material.base_color,

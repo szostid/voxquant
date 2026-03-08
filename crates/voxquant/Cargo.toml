@@ -20,6 +20,10 @@ anyhow.workspace = true
 rayon.workspace = true
 profiling.workspace = true
 
+voxquant_core.workspace = true
+voxquant_gltf.workspace = true
+voxquant_dotvox.workspace = true
+
 [features]
 default = ["dynamic_palette"]
 dynamic_palette = ["dep:quantette"]

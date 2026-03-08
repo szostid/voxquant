@@ -1,11 +1,21 @@
-use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
-use voxquant_core::scene::{Material, MaterialTexturing, Scene, WrapMode};
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![warn(clippy::cargo)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    clippy::cast_precision_loss
+)]
 
 use anyhow::{Context as _, Result};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use image::{Rgba, RgbaImage};
 use std::path::Path;
 use std::sync::Arc;
+use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
+use voxquant_core::scene::{Material, MaterialTexturing, Scene, WrapMode};
+use voxquant_core::{Format, InputFormat, VoxelizationConfig};
 
 struct MeshInstance<'a> {
     mesh: gltf::Mesh<'a>,
@@ -117,7 +127,7 @@ fn get_material_texture_data(
         None
     }
 
-    fn into_voxelization_mode(value: gltf::texture::WrappingMode) -> WrapMode {
+    const fn into_voxelization_mode(value: gltf::texture::WrappingMode) -> WrapMode {
         match value {
             gltf::texture::WrappingMode::ClampToEdge => WrapMode::ClampToEdge,
             gltf::texture::WrappingMode::MirroredRepeat => WrapMode::MirroredRepeat,
@@ -371,7 +381,7 @@ fn import_gltf(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
+fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
     let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
     let mut materials = document
@@ -430,4 +440,32 @@ pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
         materials,
         bounds,
     })
+}
+
+pub struct Gltf;
+
+impl Format for Gltf {
+    // Y: up, -Z: forward, X: right
+    const BASIS: Mat4 = Mat4::from_cols(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),  // X
+        Vec4::new(0.0, 1.0, 0.0, 0.0),  // Y
+        Vec4::new(0.0, 0.0, -1.0, 0.0), // -Z
+        Vec4::new(0.0, 0.0, 0.0, 1.0),  // W
+    );
+}
+
+impl InputFormat for Gltf {
+    type Config = ();
+
+    fn load(
+        transform_matrix: Mat4,
+        path: &Path,
+        (): (),
+        voxelization_config: &VoxelizationConfig,
+    ) -> Result<Scene> {
+        let root_transform =
+            transform_matrix * Mat4::from_scale(Vec3::splat(voxelization_config.base_scale));
+
+        load_gltf(path, root_transform)
+    }
 }

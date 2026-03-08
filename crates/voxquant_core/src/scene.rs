@@ -1,6 +1,5 @@
-use crate::*;
-use geometry::{BoundingBox, Triangle};
-
+use crate::geometry::{BoundingBox, Triangle};
+use image::{Rgba, RgbaImage};
 use std::sync::Arc;
 
 pub struct Material {
