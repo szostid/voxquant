@@ -41,7 +41,6 @@ pub struct Material {
 pub struct MaterialTexturing {
     /// The actual texture
     pub texture: Arc<RgbaImage>,
-    pub tex_coords: u32,
     /// Wrap modes for `u, v` respectively
     pub wrap_mode: [WrapMode; 2],
 }

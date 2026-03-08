@@ -35,10 +35,6 @@ pub struct VoxelizationConfig {
     #[arg(short, long, default_value_t = 1024)]
     pub res: u32,
 
-    /// The scale of the output model
-    #[arg(long, default_value_t = 1.0)]
-    pub base_scale: f32,
-
     /// The mode of voxelization. Defaults to triangles,
     /// but you can voxelize the wireframe or vertices
     /// instead.
@@ -69,12 +65,7 @@ pub trait InputFormat: Format {
     /// This depends on the exact implementation of the format. Usually
     /// missing or malformed files or unsupported features will cause
     /// erros.
-    fn load(
-        transform_matrix: Mat4,
-        path: &Path,
-        format_config: Self::Config,
-        voxelization_config: &VoxelizationConfig,
-    ) -> Result<Scene>;
+    fn load(transform_matrix: Mat4, path: &Path, format_config: Self::Config) -> Result<Scene>;
 }
 
 /// Base trait for supported output file formats.

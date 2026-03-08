@@ -16,6 +16,7 @@ gltf = { version = "1.4", default-features = false, features = [
     "utils",
     "KHR_materials_pbrSpecularGlossiness",
 ] }
+clap = { workspace = true, features = ["derive"] }
 voxquant_core.workspace = true
 glam.workspace = true
 image.workspace = true

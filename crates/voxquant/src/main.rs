@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use voxquant_core::{Format, InputFormat, OutputFormat, VoxelizationConfig};
 use voxquant_dotvox::DotVoxConfig;
+use voxquant_gltf::GltfConfig;
 
 /// Returns the extension of the file at `path`
 fn get_extension(path: &Path) -> Result<&str> {
@@ -61,9 +62,11 @@ impl OutputType {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct CliConfig {
+    /// Input file
     #[arg(short, long)]
     pub input: PathBuf,
 
+    /// Output file
     #[arg(short, long)]
     pub output: PathBuf,
 
@@ -72,6 +75,9 @@ struct CliConfig {
 
     #[command(flatten)]
     pub dotvox_cfg: DotVoxConfig,
+
+    #[command(flatten)]
+    pub gltf_cfg: GltfConfig,
 }
 
 fn main() -> Result<()> {
@@ -94,7 +100,7 @@ fn main() -> Result<()> {
 
     let scene = match input_format {
         InputType::GlbGltf => {
-            voxquant_gltf::Gltf::load(transform_matrix, &config.input, (), &config.voxel_cfg)?
+            voxquant_gltf::Gltf::load(transform_matrix, &config.input, config.gltf_cfg)?
         }
     };
 
