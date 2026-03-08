@@ -15,9 +15,9 @@ readme = "README.md"
 repository = "https://github.com/szostid/voxquant"
 
 [workspace.dependencies]
-voxquant_core.path = "crates/voxquant_core"
-voxquant_gltf.path = "crates/voxquant_gltf"
-voxquant_dotvox.path = "crates/voxquant_dotvox"
+voxquant_core = { path = "crates/voxquant_core", version = "0.4.0" }
+voxquant_gltf = { path = "crates/voxquant_gltf", version = "0.4.0" }
+voxquant_dotvox = { path = "crates/voxquant_dotvox", version = "0.4.0" }
 
 image = { version = "0.25", default-features = false }
 clap = "4.5"
