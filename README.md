@@ -41,12 +41,12 @@ All the benchmarks here use the [Amazon Lumberyard Bistro](https://developer.nvi
 
 The loading of the scene takes ~1.9s.
 The voxelization + save is as follows:
-- color: static, resolution: 2048 - ~0.65s
-- color: static, resolution: 4096 - ~1.45s
-- color: static, resolution: 8192 - ~5.07s
-- color: dynamic, resolution: 2048 - ~0.82s
-- color: dynamic, resolution: 2048 - ~1.72s
-- color: dynamic, resolution: 8192 - ~6.7s
+- color: static, resolution: 2048 - ~0.92s
+- color: static, resolution: 4096 - ~1.95s
+- color: static, resolution: 8192 - ~6.9s
+- color: dynamic, resolution: 2048 - ~1.07s
+- color: dynamic, resolution: 2048 - ~2.4s
+- color: dynamic, resolution: 8192 - ~8.5s
 
 The output is visible below
 

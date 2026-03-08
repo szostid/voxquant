@@ -184,7 +184,7 @@ fn voxelize_line<T: VoxelStore>(
     p2: Vec3,
     range: Range<IVec3>,
 ) {
-    let end = p2.as_ivec3();
+    let end = p2.floor().as_ivec3();
     let ray_pos = p1;
 
     let box_min = range.start.as_vec3();
@@ -199,7 +199,7 @@ fn voxelize_line<T: VoxelStore>(
     let inv_dir = Vec3::ONE / ray_dir;
 
     let mut t_entry = 0.0_f32;
-    let mut t_exit = 1.0_f32;
+    let mut t_exit = (p2 - p1).length();
 
     for i in 0..3 {
         // line is parallel and its outside of the bounding box
@@ -224,9 +224,13 @@ fn voxelize_line<T: VoxelStore>(
         return;
     }
 
+    let mut current_ray_pos = p1;
+    if t_entry > 0.0 {
+        current_ray_pos += ray_dir * t_entry;
+    }
     let limit = t_exit + 0.01;
 
-    let mut voxel_pos = ray_pos.floor().as_ivec3();
+    let mut voxel_pos = current_ray_pos.floor().as_ivec3();
 
     let t_delta = inv_dir.abs();
     let step = ray_dir.signum().as_ivec3();
