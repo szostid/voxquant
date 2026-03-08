@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 name = "voxquant"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Dawid Sz <szostid@gmail.com>"]
 description = "A program to convert triangle meshes to voxels."
 edition = "2024"
@@ -15,9 +15,9 @@ readme = "README.md"
 repository = "https://github.com/szostid/voxquant"
 
 [workspace.dependencies]
-voxquant_core = { path = "crates/voxquant_core", version = "0.4.0" }
-voxquant_gltf = { path = "crates/voxquant_gltf", version = "0.4.0" }
-voxquant_dotvox = { path = "crates/voxquant_dotvox", version = "0.4.0" }
+voxquant_core = { path = "crates/voxquant_core", version = "0.4.1" }
+voxquant_gltf = { path = "crates/voxquant_gltf", version = "0.4.1" }
+voxquant_dotvox = { path = "crates/voxquant_dotvox", version = "0.4.1" }
 
 image = { version = "0.25", default-features = false }
 clap = "4.5"
