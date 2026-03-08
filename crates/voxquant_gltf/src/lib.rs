@@ -475,7 +475,7 @@ fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
     })
 }
 
-/// Config for the [`DotVox`] voxelizer.
+/// Config for the [`Gltf`] voxelizer.
 #[derive(Debug, Args)]
 #[command(next_help_heading = "`.gltf` format options")]
 pub struct GltfConfig {
