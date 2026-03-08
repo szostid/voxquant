@@ -1,11 +1,11 @@
-use crate::*;
-use scene::Scene;
+use voxquant_core::scene::Scene;
+use voxquant_core::{Args, ColorMode};
 
 mod serialization;
 mod voxelization;
 
 #[profiling::function]
-pub fn voxelize_and_save(scene: Scene, args: &Args) -> Result<()> {
+pub fn voxelize_and_save(scene: Scene, args: &Args) -> anyhow::Result<()> {
     let largest_dim = scene.bounds.size().max_element();
     let scale = args.res as f32 / largest_dim;
 

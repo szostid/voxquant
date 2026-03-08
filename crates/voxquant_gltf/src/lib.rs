@@ -1,8 +1,10 @@
-use crate::*;
-use geometry::{BoundingBox, Triangle, Vertex};
-use scene::{Material, MaterialTexturing, Scene, WrapMode};
+use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
+use voxquant_core::scene::{Material, MaterialTexturing, Scene, WrapMode};
 
+use anyhow::{Context as _, Result};
 use glam::{Mat4, Vec2, Vec3};
+use image::{Rgba, RgbaImage};
+use std::path::Path;
 use std::sync::Arc;
 
 struct MeshInstance<'a> {
@@ -89,16 +91,6 @@ fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<
     Ok(Arc::clone(image))
 }
 
-impl From<gltf::texture::WrappingMode> for WrapMode {
-    fn from(value: gltf::texture::WrappingMode) -> Self {
-        match value {
-            gltf::texture::WrappingMode::ClampToEdge => Self::ClampToEdge,
-            gltf::texture::WrappingMode::MirroredRepeat => Self::MirroredRepeat,
-            gltf::texture::WrappingMode::Repeat => Self::Repeat,
-        }
-    }
-}
-
 fn get_material_texture_data(
     mat: &gltf::Material,
     image_data: &[Arc<RgbaImage>],
@@ -125,6 +117,14 @@ fn get_material_texture_data(
         None
     }
 
+    fn into_voxelization_mode(value: gltf::texture::WrappingMode) -> WrapMode {
+        match value {
+            gltf::texture::WrappingMode::ClampToEdge => WrapMode::ClampToEdge,
+            gltf::texture::WrappingMode::MirroredRepeat => WrapMode::MirroredRepeat,
+            gltf::texture::WrappingMode::Repeat => WrapMode::Repeat,
+        }
+    }
+
     with_material_texture(mat, |texture_info| {
         let texture_index = texture_info.texture().source().index();
 
@@ -136,8 +136,8 @@ fn get_material_texture_data(
             texture: Arc::clone(texture),
             tex_coords: texture_info.tex_coord(),
             wrap_mode: [
-                texture_info.texture().sampler().wrap_s().into(),
-                texture_info.texture().sampler().wrap_t().into(),
+                into_voxelization_mode(texture_info.texture().sampler().wrap_s()),
+                into_voxelization_mode(texture_info.texture().sampler().wrap_t()),
             ],
         })
     })

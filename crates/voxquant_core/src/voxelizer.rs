@@ -5,6 +5,26 @@ use scene::{Scene, WrapMode};
 use glam::{IVec3, Vec2, Vec3, Vec4};
 use std::ops::Range;
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum VoxelizationMode {
+    #[value(name = "triangles")]
+    Triangles,
+    #[value(name = "wireframe")]
+    Wireframe,
+    #[value(name = "points")]
+    Points,
+}
+
+impl Display for VoxelizationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Triangles => f.write_str("triangles"),
+            Self::Wireframe => f.write_str("wireframe"),
+            Self::Points => f.write_str("points"),
+        }
+    }
+}
+
 pub trait VoxelStore {
     fn add_voxel(&mut self, pos: IVec3, color: Rgba<u8>, is_emissive: bool);
 }

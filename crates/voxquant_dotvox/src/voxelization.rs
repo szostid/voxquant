@@ -1,8 +1,8 @@
-use crate::*;
-use scene::Scene;
-use voxelizer::{SceneSlice, VoxelStore};
+use voxquant_core::scene::Scene;
+use voxquant_core::voxelizer::{SceneSlice, VoxelStore, VoxelizationMode};
 
 use glam::{IVec3, U8Vec3};
+use image::Rgba;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -105,7 +105,7 @@ pub fn voxelize<T: VoxelType>(
                 indices: Some(&tris),
             };
 
-            voxelizer::voxelize_scene(&mut chunk, input, mode, size);
+            voxquant_core::voxelizer::voxelize_scene(&mut chunk, input, mode, size);
 
             if optimize {
                 chunk.optimize();

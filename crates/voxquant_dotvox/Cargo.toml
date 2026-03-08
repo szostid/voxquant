@@ -1,0 +1,26 @@
+[package]
+name = "voxquant_dotvox"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[dependencies]
+dot_vox = "5.2"
+voxquant_core.workspace = true
+glam.workspace = true
+image.workspace = true
+bytemuck.workspace = true
+profiling.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+quantette = { workspace = true, optional = true }
+
+[features]
+default = ["dynamic_palette"]
+dynamic_palette = ["dep:quantette"]
