@@ -1,6 +1,10 @@
-[package]
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
 name = "voxquant"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Dawid Sz <szostid@gmail.com>"]
 description = "A program to convert triangle meshes to voxels."
 edition = "2024"
@@ -10,22 +14,31 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/szostid/voxquant"
 
-[dependencies]
+[workspace.dependencies]
+voxquant_core.path = "crates/voxquant_core"
+voxquant_gltf.path = "crates/voxquant_gltf"
+voxquant_dotvox.path = "crates/voxquant_dotvox"
+
 image = { version = "0.25", default-features = false }
-gltf = { version = "1.4", default-features = false, features = [
-    "import",
-    "utils",
-    "KHR_materials_pbrSpecularGlossiness",
-] }
-clap = { version = "4.5", features = ["derive"] }
-glam = { version = "0.30", features = ["bytemuck"] }
-quantette = { version = "0.5", optional = true }
+clap = "4.5"
+glam = "0.30"
+quantette = "0.5"
 bytemuck = "1.24"
 anyhow = "1.0"
 rayon = "1.11"
-dot_vox = "5.2"
 profiling = "1.0"
 
-[features]
-default = ["dynamic_palette"]
-dynamic_palette = ["dep:quantette"]
+[workspace.lints.clippy]
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+# there's a lot of quantization that has to be done here 
+# so generally these are OK to ignore
+cast_possible_truncation = { level = "allow", priority = 1 }
+cast_sign_loss = { level = "allow", priority = 1 }
+cast_lossless = { level = "allow", priority = 1 }
+cast_precision_loss = { level = "allow", priority = 1 }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unused_crate_dependencies = "warn"

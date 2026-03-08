@@ -1,9 +1,23 @@
-use crate::*;
-use geometry::{BoundingBox, Triangle, Vertex};
-use scene::{Material, MaterialTexturing, Scene, WrapMode};
-
-use glam::{Mat4, Vec2, Vec3};
+//! `glTF 2.0` input support for [`voxquant_core`] through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
+use anyhow::{Context as _, Result};
+use clap::Args;
+use glam::{Mat4, Vec2, Vec3, Vec4};
+use image::{Rgba, RgbaImage};
+use std::path::Path;
 use std::sync::Arc;
+use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
+use voxquant_core::scene::{Material, MaterialTexturing, Scene, WrapMode};
+use voxquant_core::{Format, InputFormat};
+
+struct GltfTexturingExtras {
+    tex_coord: u32,
+}
+
+struct GltfMaterialExtras {
+    /// If the material has some [`texturing`](Material::texturing),
+    /// this will contain the texturing extras
+    texturing: Option<GltfTexturingExtras>,
+}
 
 struct MeshInstance<'a> {
     mesh: gltf::Mesh<'a>,
@@ -89,20 +103,10 @@ fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<
     Ok(Arc::clone(image))
 }
 
-impl From<gltf::texture::WrappingMode> for WrapMode {
-    fn from(value: gltf::texture::WrappingMode) -> Self {
-        match value {
-            gltf::texture::WrappingMode::ClampToEdge => Self::ClampToEdge,
-            gltf::texture::WrappingMode::MirroredRepeat => Self::MirroredRepeat,
-            gltf::texture::WrappingMode::Repeat => Self::Repeat,
-        }
-    }
-}
-
 fn get_material_texture_data(
     mat: &gltf::Material,
     image_data: &[Arc<RgbaImage>],
-) -> Result<Option<MaterialTexturing>> {
+) -> Result<Option<(MaterialTexturing, GltfTexturingExtras)>> {
     fn with_material_texture<R>(
         mat: &gltf::Material,
         f: impl FnOnce(gltf::texture::Info<'_>) -> R,
@@ -125,6 +129,14 @@ fn get_material_texture_data(
         None
     }
 
+    const fn into_voxelization_mode(value: gltf::texture::WrappingMode) -> WrapMode {
+        match value {
+            gltf::texture::WrappingMode::ClampToEdge => WrapMode::ClampToEdge,
+            gltf::texture::WrappingMode::MirroredRepeat => WrapMode::MirroredRepeat,
+            gltf::texture::WrappingMode::Repeat => WrapMode::Repeat,
+        }
+    }
+
     with_material_texture(mat, |texture_info| {
         let texture_index = texture_info.texture().source().index();
 
@@ -132,20 +144,32 @@ fn get_material_texture_data(
             .get(texture_index)
             .context("failed to fetch image data (index is out of bounds)")?;
 
-        Ok(MaterialTexturing {
-            texture: Arc::clone(texture),
-            tex_coords: texture_info.tex_coord(),
-            wrap_mode: [
-                texture_info.texture().sampler().wrap_s().into(),
-                texture_info.texture().sampler().wrap_t().into(),
-            ],
-        })
+        Ok((
+            MaterialTexturing {
+                texture: Arc::clone(texture),
+                wrap_mode: [
+                    into_voxelization_mode(texture_info.texture().sampler().wrap_s()),
+                    into_voxelization_mode(texture_info.texture().sampler().wrap_t()),
+                ],
+            },
+            GltfTexturingExtras {
+                tex_coord: texture_info.tex_coord(),
+            },
+        ))
     })
     .map_or(Ok(None), |f| f.map(Some))
 }
 
 #[profiling::function]
-fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result<Material> {
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "intentionally quantized to 8-bit RGB"
+)]
+fn parse_material(
+    mat: &gltf::Material,
+    image_data: &[Arc<RgbaImage>],
+) -> Result<(Material, GltfMaterialExtras)> {
     let alpha_threshold = match mat.alpha_mode() {
         gltf::material::AlphaMode::Opaque => None,
         gltf::material::AlphaMode::Mask => {
@@ -173,14 +197,22 @@ fn parse_material(mat: &gltf::Material, image_data: &[Arc<RgbaImage>]) -> Result
             .into()
     };
 
-    let texturing = get_material_texture_data(mat, image_data)?;
+    let (texturing, texturing_extras) = match get_material_texture_data(mat, image_data)? {
+        Some((texturing, extras)) => (Some(texturing), Some(extras)),
+        None => (None, None),
+    };
 
-    Ok(Material {
-        texturing,
-        alpha_threshold,
-        base_color,
-        emissive,
-    })
+    Ok((
+        Material {
+            texturing,
+            alpha_threshold,
+            base_color,
+            emissive,
+        },
+        GltfMaterialExtras {
+            texturing: texturing_extras,
+        },
+    ))
 }
 
 #[derive(Default)]
@@ -192,10 +224,15 @@ struct MeshScratch {
 }
 
 #[profiling::function]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "safe to assume that neither material indices or triangle indices will be larger than usize"
+)]
 fn parse_mesh_instance(
     instance: MeshInstance,
     bounds: &mut BoundingBox,
     materials: &[Material],
+    material_extras: &[GltfMaterialExtras],
     buffers: &[gltf::buffer::Data],
     triangles: &mut Vec<Triangle>,
     scratch: &mut MeshScratch,
@@ -204,7 +241,7 @@ fn parse_mesh_instance(
         [i1, i2, i3]: [u32; 3],
         triangles: &mut Vec<Triangle>,
         scratch: &MeshScratch,
-        material_idx: u32,
+        material_index: u32,
     ) {
         let i1 = i1 as usize;
         let i2 = i2 as usize;
@@ -236,7 +273,7 @@ fn parse_mesh_instance(
                     scratch.colors.get(i3).copied(),
                 ),
             ],
-            material_index: material_idx,
+            material_index,
         });
     }
 
@@ -246,7 +283,10 @@ fn parse_mesh_instance(
 
         let material = &materials[material_idx];
 
-        let material_tex_coord = material.texturing.as_ref().map_or(0, |tex| tex.tex_coords);
+        let material_tex_coord = material_extras[material_idx]
+            .texturing
+            .as_ref()
+            .map_or(0, |tex| tex.tex_coord);
 
         let positions = reader
             .read_positions()
@@ -371,13 +411,13 @@ fn import_gltf(
 }
 
 #[profiling::function]
-pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
+fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
     let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
 
-    let mut materials = document
+    let (mut materials, mut material_extras) = document
         .materials()
         .map(|material| parse_material(&material, &images))
-        .collect::<Result<Vec<_>, _>>()
+        .collect::<Result<(Vec<_>, Vec<_>), _>>()
         .context("failed to parse materials")?;
 
     // default fallback material
@@ -387,6 +427,8 @@ pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
         base_color: Rgba([255, 255, 255, 255]),
         emissive: false,
     });
+
+    material_extras.push(GltfMaterialExtras { texturing: None });
 
     let mut instances = Vec::new();
     for scene in document.scenes() {
@@ -408,7 +450,7 @@ pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
         .sum();
 
     let mut triangles = Vec::with_capacity(total_triangles);
-    let mut bounds = BoundingBox::zero();
+    let mut bounds = BoundingBox::empty();
 
     let mut scratch = MeshScratch::default();
 
@@ -417,6 +459,7 @@ pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
             instance,
             &mut bounds,
             &materials,
+            &material_extras,
             &buffers,
             &mut triangles,
             &mut scratch,
@@ -430,4 +473,36 @@ pub fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
         materials,
         bounds,
     })
+}
+
+/// Config for the [`Gltf`] voxelizer.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "`.gltf` format options")]
+pub struct GltfConfig {
+    /// The provided scale will be applied onto the model during importing
+    #[arg(long, default_value_t = 1.0)]
+    pub base_scale: f32,
+}
+
+/// The definition of the input format.
+pub struct Gltf;
+
+impl Format for Gltf {
+    // Y: up, -Z: forward, X: right
+    const BASIS: Mat4 = Mat4::from_cols(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),  // X
+        Vec4::new(0.0, 1.0, 0.0, 0.0),  // Y
+        Vec4::new(0.0, 0.0, -1.0, 0.0), // -Z
+        Vec4::new(0.0, 0.0, 0.0, 1.0),  // W
+    );
+}
+
+impl InputFormat for Gltf {
+    type Config = GltfConfig;
+
+    fn load(transform_matrix: Mat4, path: &Path, config: GltfConfig) -> Result<Scene> {
+        let root_transform = transform_matrix * Mat4::from_scale(Vec3::splat(config.base_scale));
+
+        load_gltf(path, root_transform)
+    }
 }

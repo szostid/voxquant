@@ -1,10 +1,9 @@
-use crate::*;
-use scene::Scene;
-use voxelizer::{SceneSlice, VoxelStore};
-
 use glam::{IVec3, U8Vec3};
+use image::Rgba;
 use std::collections::HashMap;
 use std::ops::Range;
+use voxquant_core::scene::Scene;
+use voxquant_core::voxelizer::{SceneSlice, VoxelStore, VoxelizationMode};
 
 pub trait VoxelType: Clone + Copy + PartialEq + Eq + Send + Sync + 'static {
     fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self;
@@ -87,25 +86,25 @@ fn group_triangles(scene: &Scene, size: u32) -> HashMap<IVec3, Vec<usize>> {
 
 #[profiling::function]
 pub fn voxelize<T: VoxelType>(
-    mesh: &Scene,
+    scene: &Scene,
     size: u32,
     mode: VoxelizationMode,
     optimize: bool,
 ) -> Vec<Chunk<T>> {
     use rayon::prelude::*;
 
-    group_triangles(mesh, size)
+    group_triangles(scene, size)
         .into_par_iter()
         .map(|(chunk_idx, tris)| {
             let mut chunk = Chunk::new(chunk_idx * 256);
 
             let input = SceneSlice {
-                mesh,
+                scene,
                 range: chunk.range(),
                 indices: Some(&tris),
             };
 
-            voxelizer::voxelize_scene(&mut chunk, input, mode, size);
+            voxquant_core::voxelizer::voxelize_scene(&mut chunk, input, mode, size);
 
             if optimize {
                 chunk.optimize();
