@@ -7,6 +7,8 @@ The crate can be used to create converters to custom formats easily.
 
 Both `.gltf` loading and voxelization are parallelized. The vast majority of `gltf2` features are supported[1].
 
+This project is based on an implementation made by [noahbadoa](https://github.com/noahbadoa) but the project was entirely rewritten by me to make it much more robust and performant. Big thanks!
+
 [1] Missing features: skinning, morph targets, texture transforms 
 
 ## CLI Usage

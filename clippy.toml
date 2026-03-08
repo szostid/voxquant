@@ -1,1 +1,1 @@
-allowed_wildcart_imports = ["crate"]
+allowed-wildcard-imports = ["crate"]
