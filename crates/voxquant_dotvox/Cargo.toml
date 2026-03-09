@@ -1,6 +1,6 @@
 [package]
 name = "voxquant_dotvox"
-version.workspace = true
+version = "0.4.3"
 authors.workspace = true
 description.workspace = true
 edition.workspace = true
