@@ -26,7 +26,8 @@ Options:
 - `-o, --output <OUTPUT>`  The output file after voxelization
 - `-r, --res <RES>`        The resolution of the output model [default: 1024]
 - `--base-scale`           The default scale of the model [default: 1.0]
-- `--mode`                 The voxelization mode (triangles / wireframe / points) [default: triangles]
+- `--mode`                 The voxelization mode (triangles / fat-triangles / wireframe / points) [default: triangles]
+                           Fat triangles guarnatees that neighbouring voxels from one triangle will always share faces
 - `--no-optimization`      Disables deduplication of voxels. If two triangles share a voxel, both voxels will be present in the output file
 - `--color`                Chooses the palette generation mode. It defaults to dynamic, but you can choose to use a static palette instead
 - `-h, --help`             Print help

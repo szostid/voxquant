@@ -13,6 +13,11 @@ pub enum VoxelizationMode {
     /// Voxelizes the whole triangle
     #[value(name = "triangles")]
     Triangles,
+    /// Voxelizes the whole triangle, with fat voxelization, meaning
+    /// that voxels are guaranteed to share faces (this can prevent
+    /// unwanted leakage in some use cases)
+    #[value(name = "fat-triangles")]
+    FatTriangles,
     /// Voxelizes only the wireframe of a triangle
     #[value(name = "wireframe")]
     Wireframe,
@@ -25,6 +30,7 @@ impl fmt::Display for VoxelizationMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Triangles => f.write_str("triangles"),
+            Self::FatTriangles => f.write_str("fat-triangles"),
             Self::Wireframe => f.write_str("wireframe"),
             Self::Points => f.write_str("points"),
         }
@@ -58,12 +64,9 @@ fn voxelize_wireframe<T: VoxelStore>(
 }
 
 /// Voxelizes the provided `triangle`.
-///
-/// If the triangle is small, or string-like then this will instead fallback
-/// to wireframe voxelization.
 #[inline]
 #[expect(clippy::suboptimal_flops, reason = "FMA makes the function unreadable")]
-fn voxelize_triangle<T: VoxelStore>(
+fn voxelize_triangle<T: VoxelStore, const FAT: bool>(
     store: &mut T,
     shading: &TriangleData,
     triangle: Triangle,
@@ -141,6 +144,13 @@ fn voxelize_triangle<T: VoxelStore>(
     let v_start = min.y.max(range.start[v_axis]);
     let v_end = max.y.min(range.end[v_axis]);
 
+    // how much the `d` could potentially change across one unit of `v` and `u`
+    let delta_d = if FAT {
+        0.5 * ((normal_u * normal_d_inv).abs() + (normal_v * normal_d_inv).abs())
+    } else {
+        0.0
+    };
+
     for u in u_start..=u_end {
         for v in v_start..=v_end {
             let p = Vec2::new(u as f32 + 0.5, v as f32 + 0.5);
@@ -160,15 +170,29 @@ fn voxelize_triangle<T: VoxelStore>(
                 // note that `plane_d` is the plane constant `D` from the equation above
                 let depth = (plane_d - normal_u * p.x - normal_v * p.y) * normal_d_inv;
 
-                let mut voxel_pos = IVec3::ZERO;
-                voxel_pos[u_axis] = u;
-                voxel_pos[v_axis] = v;
-                voxel_pos[d_axis] = depth.round() as i32;
-
                 let color = shading.sample_from_bary(Vec3::new(a_bary, b_bary, c_bary));
 
                 if let Some(color) = color {
-                    store.add_voxel(voxel_pos, color, shading.is_emissive());
+                    if FAT {
+                        let d_min = (depth - delta_d).round() as i32;
+                        let d_max = (depth + delta_d).round() as i32;
+
+                        for d in d_min..=d_max {
+                            let mut voxel_pos = IVec3::ZERO;
+                            voxel_pos[u_axis] = u;
+                            voxel_pos[v_axis] = v;
+                            voxel_pos[d_axis] = d;
+
+                            store.add_voxel(voxel_pos, color, shading.is_emissive());
+                        }
+                    } else {
+                        let mut voxel_pos = IVec3::ZERO;
+                        voxel_pos[u_axis] = u;
+                        voxel_pos[v_axis] = v;
+                        voxel_pos[d_axis] = depth.round() as i32;
+
+                        store.add_voxel(voxel_pos, color, shading.is_emissive());
+                    }
                 }
             }
         }
@@ -460,7 +484,10 @@ pub fn voxelize_scene<T: VoxelStore>(
 
         match mode {
             VoxelizationMode::Triangles => {
-                voxelize_triangle(store, &shading, triangle, input.range.clone());
+                voxelize_triangle::<T, false>(store, &shading, triangle, input.range.clone());
+            }
+            VoxelizationMode::FatTriangles => {
+                voxelize_triangle::<T, true>(store, &shading, triangle, input.range.clone());
             }
             VoxelizationMode::Wireframe => {
                 voxelize_wireframe(store, &shading, triangle, input.range.clone());
