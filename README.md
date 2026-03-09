@@ -34,7 +34,7 @@ Options:
 - `-V, --version`          Print version
 
 ## Installation
-[Cargo](https://www.rust-lang.org/tools/install 'Cargo') is requried for installation. Clone the repo and run with `cargo run -r -- (arguments)`
+[Cargo](https://www.rust-lang.org/tools/install 'Cargo') is requried for installation. Use `cargo install voxquant` or clone the repo and run with `cargo run -r -- (arguments)`
 
 ## Performance
 All the benchmarks here use the [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) scene. The exact command is
