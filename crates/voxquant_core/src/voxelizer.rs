@@ -174,8 +174,8 @@ fn voxelize_triangle<T: VoxelStore, const FAT: bool>(
 
                 if let Some(color) = color {
                     if FAT {
-                        let d_min = (depth - delta_d).round() as i32;
-                        let d_max = (depth + delta_d).round() as i32;
+                        let d_min = (depth - delta_d).floor() as i32;
+                        let d_max = (depth + delta_d).floor() as i32;
 
                         for d in d_min..=d_max {
                             let mut voxel_pos = IVec3::ZERO;
@@ -189,7 +189,7 @@ fn voxelize_triangle<T: VoxelStore, const FAT: bool>(
                         let mut voxel_pos = IVec3::ZERO;
                         voxel_pos[u_axis] = u;
                         voxel_pos[v_axis] = v;
-                        voxel_pos[d_axis] = depth.round() as i32;
+                        voxel_pos[d_axis] = depth.floor() as i32;
 
                         store.add_voxel(voxel_pos, color, shading.is_emissive());
                     }

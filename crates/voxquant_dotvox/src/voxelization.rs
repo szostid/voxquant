@@ -69,8 +69,8 @@ fn group_triangles(scene: &Scene, size: u32) -> HashMap<IVec3, Vec<usize>> {
         let min = a.min(b).min(c);
         let max = a.max(b).max(c);
 
-        let min_chunk = (min / 256.0).floor().as_ivec3();
-        let max_chunk = (max / 256.0).floor().as_ivec3();
+        let min_chunk = ((min - 1.0) / 256.0).floor().as_ivec3();
+        let max_chunk = ((max + 1.0) / 256.0).floor().as_ivec3();
 
         for z in min_chunk.z..=max_chunk.z {
             for y in min_chunk.y..=max_chunk.y {
