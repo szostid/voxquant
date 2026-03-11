@@ -3,9 +3,10 @@ use anyhow::{Context as _, Result};
 use clap::Args;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use image::{Rgba, RgbaImage};
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
+use voxquant_core::io::SceneReader;
 use voxquant_core::scene::{Material, MaterialTexturing, Scene, WrapMode};
 use voxquant_core::{Format, InputFormat};
 
@@ -372,24 +373,25 @@ fn parse_mesh_instance(
 /// A multithreaded version of `gltf::import`. Outputs `RgbaImage` instead of `gltf::image::Data`.
 #[profiling::function]
 fn import_gltf(
-    path: &Path,
+    reader: impl SceneReader,
 ) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<Arc<RgbaImage>>)> {
     use rayon::prelude::*;
 
-    let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    // this cannot depend on `reader`'s lifetime because reader is entirely
+    // consumed when loading the gltf; we map to pathbuf and deref to path
+    let base = reader.base_path().map(PathBuf::from);
+    let base = base.as_deref();
 
     let mut gltf = {
         profiling::scope!("gltf::load_document");
 
-        let file = std::fs::File::open(path).context("failed to open file")?;
-        let reader = std::io::BufReader::new(file);
         gltf::Gltf::from_reader(reader).context("failed to parse gltf")?
     };
 
     let buffers = {
         profiling::scope!("gltf::import_buffers");
 
-        gltf::import_buffers(&gltf.document, Some(base), gltf.blob.take())
+        gltf::import_buffers(&gltf.document, base, gltf.blob.take())
             .context("failed to read buffers")?
     };
 
@@ -400,7 +402,7 @@ fn import_gltf(
         .map(|image| {
             profiling::scope!("gltf::load_image");
 
-            let texture_data = gltf::image::Data::from_source(image.source(), Some(base), &buffers)
+            let texture_data = gltf::image::Data::from_source(image.source(), base, &buffers)
                 .context("failed to read texture")?;
 
             convert_image(texture_data)
@@ -411,8 +413,9 @@ fn import_gltf(
 }
 
 #[profiling::function]
-fn load_gltf(path: &Path, root_transform: Mat4) -> Result<Scene> {
-    let (document, buffers, images) = import_gltf(path).context("failed to load the gltf file")?;
+fn load_gltf(reader: impl SceneReader, root_transform: Mat4) -> Result<Scene> {
+    let (document, buffers, images) =
+        import_gltf(reader).context("failed to load the gltf file")?;
 
     let (mut materials, mut material_extras) = document
         .materials()
@@ -485,6 +488,10 @@ pub struct GltfConfig {
 }
 
 /// The definition of the input format.
+///
+/// NOTE: The format requires [`SceneReader::base_path`]
+/// to return [`Some`] if using the `.gltf` file extension.
+/// `.glb` does not use it.
 pub struct Gltf;
 
 impl Format for Gltf {
@@ -500,9 +507,13 @@ impl Format for Gltf {
 impl InputFormat for Gltf {
     type Config = GltfConfig;
 
-    fn load(transform_matrix: Mat4, path: &Path, config: GltfConfig) -> Result<Scene> {
+    fn read<R: SceneReader>(
+        transform_matrix: Mat4,
+        reader: R,
+        config: GltfConfig,
+    ) -> Result<Scene> {
         let root_transform = transform_matrix * Mat4::from_scale(Vec3::splat(config.base_scale));
 
-        load_gltf(path, root_transform)
+        load_gltf(reader, root_transform)
     }
 }

@@ -24,6 +24,7 @@ use std::path::Path;
 use voxelizer::VoxelizationMode;
 
 pub mod geometry;
+pub mod io;
 pub mod scene;
 pub mod voxelizer;
 
@@ -57,6 +58,20 @@ pub trait InputFormat: Format {
     /// The specific format config required by this format
     type Config;
 
+    /// Loads the scene from the provided reader using this format.
+    ///
+    /// The scene will be transformed using the `transform_matrix`.
+    ///
+    /// # Errors
+    /// This depends on the exact implementation of the format. Usually
+    /// missing or malformed files or unsupported features will cause
+    /// erros.
+    fn read<R: io::SceneReader>(
+        transform_matrix: Mat4,
+        reader: R,
+        format_config: Self::Config,
+    ) -> Result<Scene>;
+
     /// Loads the scene from the file at `path` using this format.
     ///
     /// The scene will be transformed using the `transform_matrix`.
@@ -65,13 +80,30 @@ pub trait InputFormat: Format {
     /// This depends on the exact implementation of the format. Usually
     /// missing or malformed files or unsupported features will cause
     /// erros.
-    fn load(transform_matrix: Mat4, path: &Path, format_config: Self::Config) -> Result<Scene>;
+    fn load(transform_matrix: Mat4, path: &Path, format_config: Self::Config) -> Result<Scene> {
+        let reader = io::LocalFile::open(path)?;
+
+        Self::read(transform_matrix, reader, format_config)
+    }
 }
 
 /// Base trait for supported output file formats.
 pub trait OutputFormat: Format {
     /// The specific format config required by this format
     type Config;
+
+    /// Voxelizes and writes the scene to `writer` using this format.
+    ///
+    /// # Errors
+    /// This depends on the exact implementation of the format. Usually
+    /// missing or malformed files or unsupported features will cause
+    /// erros.
+    fn voxelize_and_write<W: io::SceneWriter>(
+        scene: Scene,
+        writer: W,
+        format_config: Self::Config,
+        voxelization_config: &VoxelizationConfig,
+    ) -> Result<()>;
 
     /// Voxelizes and saves the scene at `path` using this format.
     ///
@@ -84,5 +116,9 @@ pub trait OutputFormat: Format {
         path: &Path,
         format_config: Self::Config,
         voxelization_config: &VoxelizationConfig,
-    ) -> Result<()>;
+    ) -> Result<()> {
+        let writer = io::LocalFile::create(path)?;
+
+        Self::voxelize_and_write(scene, writer, format_config, voxelization_config)
+    }
 }

@@ -4,7 +4,7 @@ use dot_vox::{Color, Model, Voxel};
 use glam::{IVec3, U8Vec3};
 use image::Rgba;
 use std::num::NonZeroU8;
-use std::path::Path;
+use voxquant_core::io::SceneWriter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VoxelWithColor {
@@ -183,9 +183,9 @@ fn quantize_colors(chunks: Vec<Chunk<VoxelWithColor>>) -> (Vec<Model>, Vec<IVec3
     clippy::default_trait_access,
     reason = "we don't have access to the AHashMap type"
 )]
-pub fn save_vox_dynamic(
+pub fn write_vox_dynamic(
     chunks: Vec<Chunk<VoxelWithColor>>,
-    file_path: &Path,
+    mut output: impl SceneWriter,
     shift: IVec3,
 ) -> Result<()> {
     use dot_vox::{DotVoxData, Frame, SceneNode, ShapeModel};
@@ -253,9 +253,7 @@ pub fn save_vox_dynamic(
         scenes: nodes,
     };
 
-    let mut file = std::fs::File::create(file_path)?;
-
-    data.write_vox(&mut file)?;
+    data.write_vox(&mut output)?;
 
     Ok(())
 }
@@ -265,9 +263,9 @@ pub fn save_vox_dynamic(
     clippy::default_trait_access,
     reason = "we don't have access to the AHashMap type"
 )]
-pub fn save_vox_static(
+pub fn write_vox_static(
     chunks: Vec<Chunk<dot_vox::Voxel>>,
-    file_path: &Path,
+    mut output: impl SceneWriter,
     shift: IVec3,
 ) -> Result<()> {
     use dot_vox::{DotVoxData, Frame, SceneNode, ShapeModel, Size};
@@ -361,9 +359,7 @@ pub fn save_vox_static(
         scenes: nodes,
     };
 
-    let mut file = std::fs::File::create(file_path)?;
-
-    data.write_vox(&mut file)?;
+    data.write_vox(&mut output)?;
 
     Ok(())
 }

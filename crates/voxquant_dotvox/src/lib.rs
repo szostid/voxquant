@@ -3,8 +3,9 @@ use anyhow::Result;
 use clap::{Args, ValueEnum};
 use glam::{Mat4, Vec4};
 use std::fmt;
-use std::path::Path;
-use voxquant_core::{Format, OutputFormat, VoxelizationConfig, scene::Scene};
+use voxquant_core::io::SceneWriter;
+use voxquant_core::scene::Scene;
+use voxquant_core::{Format, OutputFormat, VoxelizationConfig};
 
 mod serialization;
 mod voxelization;
@@ -36,11 +37,11 @@ impl fmt::Display for ColorMode {
 }
 
 #[profiling::function]
-fn voxelize_and_save(
+fn voxelize_and_write(
     scene: Scene,
     format_config: &DotVoxConfig,
     voxelization_config: &VoxelizationConfig,
-    output: &Path,
+    output: impl SceneWriter,
 ) -> Result<()> {
     let largest_dim = scene.bounds.size().max_element();
     let scale = voxelization_config.res as f32 / largest_dim;
@@ -58,7 +59,7 @@ fn voxelize_and_save(
                 !format_config.no_optimization,
             );
 
-            serialization::save_vox_static(data, output, center_offset)?;
+            serialization::write_vox_static(data, output, center_offset)?;
         }
         #[cfg(feature = "dynamic_palette")]
         ColorMode::Dynamic => {
@@ -69,7 +70,7 @@ fn voxelize_and_save(
                 !format_config.no_optimization,
             );
 
-            serialization::save_vox_dynamic(data, output, center_offset)?;
+            serialization::write_vox_dynamic(data, output, center_offset)?;
         }
     }
 
@@ -97,6 +98,9 @@ pub struct DotVoxConfig {
 }
 
 /// The definition of the output format.
+///
+/// NOTE: Does not use [`SceneWriter::base_path`]
+/// at all. You may return [`None`].
 pub struct DotVox;
 
 impl Format for DotVox {
@@ -112,12 +116,12 @@ impl Format for DotVox {
 impl OutputFormat for DotVox {
     type Config = DotVoxConfig;
 
-    fn voxelize_and_save(
+    fn voxelize_and_write<W: SceneWriter>(
         scene: Scene,
-        output: &Path,
+        output: W,
         format_config: Self::Config,
         voxelization_config: &VoxelizationConfig,
     ) -> Result<()> {
-        voxelize_and_save(scene, &format_config, voxelization_config, output)
+        voxelize_and_write(scene, &format_config, voxelization_config, output)
     }
 }
