@@ -3,6 +3,7 @@
 //! The tool supports (glTF 2.0)[`voxquant_gltf`] and (Magicavoxel)[`voxquant_dotvox`].
 use anyhow::{Context as _, Result, bail};
 use clap::Parser;
+use glam::Mat4;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use voxquant_core::{Format, InputFormat, OutputFormat, VoxelizationConfig};
@@ -87,11 +88,13 @@ fn main() -> Result<()> {
     let output_format = OutputType::from_file(&config.output)?;
 
     let input_basis = match input_format {
-        InputType::GlbGltf => voxquant_gltf::Gltf::BASIS,
+        InputType::GlbGltf => Mat4::from_cols_array_2d(&voxquant_gltf::Gltf::BASIS),
     };
 
     let output_basis_inverse = match output_format {
-        OutputType::MagicaVoxel => voxquant_dotvox::DotVox::BASIS.inverse(),
+        OutputType::MagicaVoxel => {
+            Mat4::from_cols_array_2d(&voxquant_dotvox::DotVox::BASIS).inverse()
+        }
     };
 
     let transform_matrix = output_basis_inverse * input_basis;
@@ -99,9 +102,11 @@ fn main() -> Result<()> {
     let t0 = Instant::now();
 
     let scene = match input_format {
-        InputType::GlbGltf => {
-            voxquant_gltf::Gltf::load(transform_matrix, &config.input, config.gltf_cfg)?
-        }
+        InputType::GlbGltf => voxquant_gltf::Gltf::load(
+            transform_matrix.to_cols_array_2d(),
+            &config.input,
+            config.gltf_cfg,
+        )?,
     };
 
     let t1 = Instant::now();

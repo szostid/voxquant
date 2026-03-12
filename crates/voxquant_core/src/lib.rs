@@ -18,7 +18,6 @@
 
 use crate::scene::Scene;
 use crate::voxelizer::VoxelizationMode;
-use glam::Mat4;
 use std::error::Error;
 use std::path::Path;
 
@@ -48,11 +47,12 @@ pub struct VoxelizationConfig {
 /// Base trait for supported 3D file formats.
 pub trait Format {
     /// The orthogonal basis matrix defining the format's coordinate system.
+    /// Column major, equivalent to [`glam::Mat4::to_cols_array_2d`]
     ///
     /// You can translate from an input format's coordinate system into an output
     /// format's coordinate system with the `output_basis.inverse() * input_basis`
     /// matrix.
-    const BASIS: Mat4;
+    const BASIS: [[f32; 4]; 4];
 }
 
 /// Base trait for supported input file formats.
@@ -72,7 +72,7 @@ pub trait InputFormat: Format {
     /// missing or malformed files or unsupported features will cause
     /// erros.
     fn read<R: io::SceneReader>(
-        transform_matrix: Mat4,
+        transform_matrix: [[f32; 4]; 4],
         reader: R,
         format_config: Self::Config,
     ) -> Result<Scene, Self::Error>;
@@ -86,7 +86,7 @@ pub trait InputFormat: Format {
     /// missing or malformed files or unsupported features will cause
     /// erros.
     fn load(
-        transform_matrix: Mat4,
+        transform_matrix: [[f32; 4]; 4],
         path: &Path,
         format_config: Self::Config,
     ) -> Result<Scene, Self::Error> {

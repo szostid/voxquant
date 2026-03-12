@@ -1,5 +1,5 @@
 //! `glTF 2.0` input support for [`voxquant_core`] through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use image::RgbaImage;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -495,12 +495,12 @@ pub struct Gltf;
 
 impl Format for Gltf {
     // Y: up, -Z: forward, X: right
-    const BASIS: Mat4 = Mat4::from_cols(
-        Vec4::new(1.0, 0.0, 0.0, 0.0),  // X
-        Vec4::new(0.0, 1.0, 0.0, 0.0),  // Y
-        Vec4::new(0.0, 0.0, -1.0, 0.0), // -Z
-        Vec4::new(0.0, 0.0, 0.0, 1.0),  // W
-    );
+    const BASIS: [[f32; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],  // X
+        [0.0, 1.0, 0.0, 0.0],  // Y
+        [0.0, 0.0, -1.0, 0.0], // -Z
+        [0.0, 0.0, 0.0, 1.0],  // W
+    ];
 }
 
 impl InputFormat for Gltf {
@@ -508,11 +508,12 @@ impl InputFormat for Gltf {
     type Error = Error;
 
     fn read<R: SceneReader>(
-        transform_matrix: Mat4,
+        transform_matrix: [[f32; 4]; 4],
         reader: R,
         config: GltfConfig,
     ) -> Result<Scene> {
-        let root_transform = transform_matrix * Mat4::from_scale(Vec3::splat(config.base_scale));
+        let root_transform = Mat4::from_cols_array_2d(&transform_matrix)
+            * Mat4::from_scale(Vec3::splat(config.base_scale));
 
         load_gltf(reader, root_transform)
     }

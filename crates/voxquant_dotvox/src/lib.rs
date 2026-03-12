@@ -1,5 +1,5 @@
 //! `MagicaVoxel` support for [`voxquant_core`] through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
-use glam::{Mat4, Vec3, Vec4};
+use glam::Vec3;
 use std::fmt;
 use std::io;
 use voxquant_core::io::SceneWriter;
@@ -104,12 +104,12 @@ pub struct DotVox;
 
 impl Format for DotVox {
     // Z: up, Y: forward, X: right
-    const BASIS: Mat4 = Mat4::from_cols(
-        Vec4::new(1.0, 0.0, 0.0, 0.0),
-        Vec4::new(0.0, 0.0, 1.0, 0.0),
-        Vec4::new(0.0, 1.0, 0.0, 0.0),
-        Vec4::new(0.0, 0.0, 0.0, 1.0),
-    );
+    const BASIS: [[f32; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
 }
 
 impl OutputFormat for DotVox {
