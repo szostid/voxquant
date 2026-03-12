@@ -1,8 +1,8 @@
 //! `glTF 2.0` input support for [`voxquant_core`] through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
 use anyhow::{Context as _, Result};
 use clap::Args;
-use glam::{Mat4, Vec2, Vec3, Vec4};
-use image::{Rgba, RgbaImage};
+use glam::{Mat4, Vec3, Vec4};
+use image::RgbaImage;
 use std::path::PathBuf;
 use std::sync::Arc;
 use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
@@ -190,7 +190,7 @@ fn parse_material(
     let base_color = if emissive {
         let [r, g, b] = mat.emissive_factor().map(|r| (r * 255.0) as u8);
 
-        Rgba([r, g, b, 255])
+        [r, g, b, 255]
     } else {
         mat.pbr_metallic_roughness()
             .base_color_factor()
@@ -218,9 +218,9 @@ fn parse_material(
 
 #[derive(Default)]
 struct MeshScratch {
-    positions: Vec<Vec3>,
-    uvs: Vec<Vec2>,
-    colors: Vec<Rgba<u8>>,
+    positions: Vec<[f32; 3]>,
+    uvs: Vec<[f32; 2]>,
+    colors: Vec<[u8; 4]>,
     indices: Vec<u32>,
 }
 
@@ -292,7 +292,12 @@ fn parse_mesh_instance(
         let positions = reader
             .read_positions()
             .context("mesh has no positions")?
-            .map(|pos| instance.transform.transform_point3(Vec3::from(pos)));
+            .map(|pos| {
+                instance
+                    .transform
+                    .transform_point3(Vec3::from(pos))
+                    .to_array()
+            });
 
         scratch.positions.clear();
         scratch.positions.reserve(positions.len());
@@ -304,16 +309,14 @@ fn parse_mesh_instance(
 
         scratch.uvs.clear();
         if let Some(uv_iter) = reader.read_tex_coords(material_tex_coord) {
-            scratch.uvs.extend(uv_iter.into_f32().map(Vec2::from));
+            scratch.uvs.extend(uv_iter.into_f32());
         } else if material.texturing.is_some() {
             eprintln!("material has an explicit `tex_coord` which doesn't exist");
         }
 
         scratch.colors.clear();
         if let Some(color_iter) = reader.read_colors(0) {
-            let color_iter = color_iter.into_rgba_u8().map(Rgba);
-
-            scratch.colors.extend(color_iter);
+            scratch.colors.extend(color_iter.into_rgba_u8());
         }
 
         scratch.indices.clear();
@@ -427,7 +430,7 @@ fn load_gltf(reader: impl SceneReader, root_transform: Mat4) -> Result<Scene> {
     materials.push(Material {
         texturing: None,
         alpha_threshold: None,
-        base_color: Rgba([255, 255, 255, 255]),
+        base_color: [255, 255, 255, 255],
         emissive: false,
     });
 

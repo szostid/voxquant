@@ -2,19 +2,18 @@ use crate::voxelization::{Chunk, VoxelType};
 use anyhow::Result;
 use dot_vox::{Color, Model, Voxel};
 use glam::{IVec3, U8Vec3};
-use image::Rgba;
 use std::num::NonZeroU8;
 use voxquant_core::io::SceneWriter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VoxelWithColor {
     pub pos: U8Vec3,
-    pub color: Rgba<u8>,
+    pub color: [u8; 4],
 }
 
 impl VoxelType for VoxelWithColor {
     #[inline]
-    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
+    fn from_pos_color(pos: U8Vec3, color: [u8; 4]) -> Self {
         Self { pos, color }
     }
 
@@ -26,12 +25,12 @@ impl VoxelType for VoxelWithColor {
 
 impl VoxelType for dot_vox::Voxel {
     #[inline]
-    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self {
+    fn from_pos_color(pos: U8Vec3, color: [u8; 4]) -> Self {
         Self {
             x: pos.x,
             y: pos.y,
             z: pos.z,
-            i: encode_color(color.0),
+            i: encode_color(color),
         }
     }
 

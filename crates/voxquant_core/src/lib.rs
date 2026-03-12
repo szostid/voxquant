@@ -23,6 +23,8 @@ use scene::Scene;
 use std::path::Path;
 use voxelizer::VoxelizationMode;
 
+pub use image;
+
 pub mod geometry;
 pub mod io;
 pub mod scene;

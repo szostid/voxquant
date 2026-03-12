@@ -1,7 +1,7 @@
 //! `MagicaVoxel` support for [`voxquant_core`] through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
 use anyhow::Result;
 use clap::{Args, ValueEnum};
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 use std::fmt;
 use voxquant_core::io::SceneWriter;
 use voxquant_core::scene::Scene;
@@ -43,10 +43,10 @@ fn voxelize_and_write(
     voxelization_config: &VoxelizationConfig,
     output: impl SceneWriter,
 ) -> Result<()> {
-    let largest_dim = scene.bounds.size().max_element();
+    let largest_dim = Vec3::from_array(scene.bounds.size()).max_element();
     let scale = voxelization_config.res as f32 / largest_dim;
 
-    let voxel_bounds_size = scene.bounds.size() * scale;
+    let voxel_bounds_size = Vec3::from_array(scene.bounds.size()) * scale;
 
     let center_offset = -(voxel_bounds_size / 2.0).round().as_ivec3() + 128;
 

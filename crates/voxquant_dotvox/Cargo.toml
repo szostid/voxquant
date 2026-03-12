@@ -15,7 +15,6 @@ dot_vox = "5.2"
 voxquant_core.workspace = true
 clap.workspace = true
 glam.workspace = true
-image.workspace = true
 profiling.workspace = true
 anyhow.workspace = true
 rayon.workspace = true

@@ -1,7 +1,5 @@
 //! Geometric primitives and basic math for voxelization.
-use glam::{Vec2, Vec3};
-use image::Rgba;
-use std::ops::Index;
+use glam::Vec3;
 
 /// A vertex with some associated color and UV (if present) data.
 #[derive(Debug, Clone, Copy)]
@@ -11,23 +9,23 @@ pub struct Vertex {
     /// The exact origin of the vertex space is unspecified.
     /// It will be translated by the voxelizer based on
     /// the [`BoundingBox`] of the scene.
-    pub pos: Vec3,
+    pub pos: [f32; 3],
     /// The base color of the vertex. If a texture is
     /// present, its color will be tinted by this field.
-    pub color: Rgba<u8>,
+    pub color: [u8; 4],
     /// [`Vec2::NAN`] if UV's not present
-    uv: Vec2,
+    uv: [f32; 2],
 }
 
 impl Vertex {
     /// Creates a new vertex
     #[inline]
     #[must_use]
-    pub fn new(pos: Vec3, uv: Option<Vec2>, color: Option<Rgba<u8>>) -> Self {
+    pub fn new(pos: [f32; 3], uv: Option<[f32; 2]>, color: Option<[u8; 4]>) -> Self {
         Self {
             pos,
-            uv: uv.unwrap_or(Vec2::NAN),
-            color: color.unwrap_or(Rgba([255, 255, 255, 255])),
+            uv: uv.unwrap_or([f32::NAN; 2]),
+            color: color.unwrap_or([255, 255, 255, 255]),
         }
     }
 
@@ -35,8 +33,8 @@ impl Vertex {
     /// when the vertex was created.
     #[inline]
     #[must_use]
-    pub fn uv(&self) -> Option<Vec2> {
-        (self.uv != Vec2::NAN).then_some(self.uv)
+    pub fn uv(&self) -> Option<[f32; 2]> {
+        (!self.uv[0].is_nan()).then_some(self.uv)
     }
 }
 
@@ -57,7 +55,7 @@ impl Triangle {
     /// or all absent)
     #[inline]
     #[must_use]
-    pub fn uvs(&self) -> Option<[Vec2; 3]> {
+    pub fn uvs(&self) -> Option<[[f32; 2]; 3]> {
         let [va, vb, vc] = &self.vertices;
 
         let uv_a = va.uv()?;
@@ -70,17 +68,14 @@ impl Triangle {
     /// Returns the base colors of the three vertices
     #[inline]
     #[must_use]
-    pub fn colors(&self) -> [Rgba<u8>; 3] {
+    pub fn colors(&self) -> [[u8; 4]; 3] {
         self.vertices.map(|v| v.color)
     }
-}
-
-impl Index<usize> for Triangle {
-    type Output = Vec3;
 
     #[inline]
-    fn index(&self, index: usize) -> &Vec3 {
-        &self.vertices[index].pos
+    #[must_use]
+    pub(crate) fn unpack_vertices_to_glam(&self) -> [Vec3; 3] {
+        self.vertices.map(|vertex| Vec3::from_array(vertex.pos))
     }
 }
 
@@ -93,9 +88,9 @@ impl Index<usize> for Triangle {
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
     /// The smallest (minimum) point of the bounding box
-    pub min: Vec3,
+    pub min: [f32; 3],
     /// The largest (maximum) point of the bounding box
-    pub max: Vec3,
+    pub max: [f32; 3],
 }
 
 impl BoundingBox {
@@ -104,8 +99,8 @@ impl BoundingBox {
     #[must_use]
     pub const fn empty() -> Self {
         Self {
-            min: Vec3::MAX,
-            max: Vec3::MIN,
+            min: [f32::MAX; 3],
+            max: [f32::MIN; 3],
         }
     }
 
@@ -113,14 +108,18 @@ impl BoundingBox {
     #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.min.x > self.max.x || self.min.y > self.max.y || self.min.z > self.max.z
+        self.min[0] > self.max[0] || self.min[1] > self.max[1] || self.min[2] > self.max[2]
     }
 
     /// Extends the bounding box so that it contains the point `p`
     #[inline]
-    pub fn extend(&mut self, p: Vec3) {
-        self.min = self.min.min(p);
-        self.max = self.max.max(p);
+    pub fn extend(&mut self, p: [f32; 3]) {
+        self.min[0] = self.min[0].min(p[0]);
+        self.min[1] = self.min[1].min(p[1]);
+        self.min[2] = self.min[2].min(p[2]);
+        self.max[0] = self.max[0].max(p[0]);
+        self.max[1] = self.max[1].max(p[1]);
+        self.max[2] = self.max[2].max(p[2]);
     }
 
     /// Returns the size of the bounding box (i.e. `max - min`).
@@ -128,98 +127,11 @@ impl BoundingBox {
     /// If the bounding box is [`empty`](Self::empty), returns [`Vec3::ZERO`]
     #[inline]
     #[must_use]
-    pub fn size(&self) -> Vec3 {
-        (self.max - self.min).max(Vec3::ZERO)
-    }
-}
-
-/// Computes barycentric coordinates for points on a triangle's surface.
-///
-/// Used to interpolate UVs, normals, and colors across a triangle.
-#[derive(Debug, Clone, Copy)]
-pub struct TriangleInterpolator {
-    /// `a`
-    a: Vec3,
-
-    /// `b - a`
-    v0: Vec3,
-    /// `c - a`
-    v1: Vec3,
-
-    /// `(b - a)^2`
-    d00: f32,
-    /// `(b - a)(c - a)`
-    d01: f32,
-    /// `(c - a)^2`
-    d11: f32,
-
-    /// Inverse determinant for Cramer's rule
-    inv_det: f32,
-}
-
-impl TriangleInterpolator {
-    /// Creates a new interpolator. If the triangle
-    /// has no area, the interpolator will return
-    /// barycentric coordinates of point `a`
-    #[inline]
-    #[must_use]
-    #[expect(clippy::suspicious_operation_groupings, reason = "???")]
-    #[expect(
-        clippy::suboptimal_flops,
-        reason = "fma makes this unreadable, and it only influences precision, not performance"
-    )]
-    pub fn new(tri: Triangle) -> Self {
-        let v0 = tri[1] - tri[0];
-        let v1 = tri[2] - tri[0];
-
-        let d00 = v0.dot(v0);
-        let d01 = v0.dot(v1);
-        let d11 = v1.dot(v1);
-
-        let det = d00 * d11 - d01 * d01;
-
-        let inv_det = if det.abs() < f32::EPSILON {
-            0.0
-        } else {
-            1.0 / det
-        };
-
-        Self {
-            a: tri[0],
-            v0,
-            v1,
-            d00,
-            d01,
-            d11,
-            inv_det,
-        }
-    }
-
-    /// Returns the normal to the surface of the triangle.
-    #[inline]
-    #[must_use]
-    pub fn normal(&self) -> Vec3 {
-        self.v0.cross(self.v1)
-    }
-
-    /// Given a point `p`, returns the barycentric coordinates
-    /// of that point's projection onto the triangle
-    #[inline]
-    #[must_use]
-    #[expect(
-        clippy::suboptimal_flops,
-        reason = "fma makes this unreadable, and it only influences precision, not performance"
-    )]
-    pub fn get_closest_barycentric(&self, p: Vec3) -> Vec3 {
-        let v2 = p - self.a;
-
-        let d20 = self.v0.dot(v2);
-        let d21 = self.v1.dot(v2);
-
-        let v = (self.d11 * d20 - self.d01 * d21) * self.inv_det;
-        let w = (self.d00 * d21 - self.d01 * d20) * self.inv_det;
-        let u = 1.0 - v - w;
-
-        Vec3::new(u, v, w)
+    pub fn size(&self) -> [f32; 3] {
+        [
+            self.max[0] - self.min[0],
+            self.max[1] - self.min[1],
+            self.max[2] - self.min[2],
+        ]
     }
 }

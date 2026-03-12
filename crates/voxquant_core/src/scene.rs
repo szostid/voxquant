@@ -1,7 +1,8 @@
 //! In-memory representation of the [`Scene`].
 use crate::geometry::{BoundingBox, Triangle};
-use image::{Rgba, RgbaImage};
 use std::sync::Arc;
+
+pub use image::RgbaImage;
 
 /// A complete 3D scene with all the data required for voxelization.
 pub struct Scene {
@@ -32,7 +33,7 @@ pub struct Material {
     pub alpha_threshold: Option<u8>,
     /// The base color of the material. If the material is emissive,
     /// this will be the color of its emissive texture.
-    pub base_color: Rgba<u8>,
+    pub base_color: [u8; 4],
     /// Whether the material is emissive
     pub emissive: bool,
 }

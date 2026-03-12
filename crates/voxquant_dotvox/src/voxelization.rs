@@ -1,12 +1,11 @@
-use glam::{IVec3, U8Vec3};
-use image::Rgba;
+use glam::{IVec3, U8Vec3, Vec3};
 use std::collections::HashMap;
 use std::ops::Range;
 use voxquant_core::scene::Scene;
 use voxquant_core::voxelizer::{SceneSlice, VoxelStore, VoxelizationMode};
 
 pub trait VoxelType: Clone + Copy + PartialEq + Eq + Send + Sync + 'static {
-    fn from_pos_color(pos: U8Vec3, color: Rgba<u8>) -> Self;
+    fn from_pos_color(pos: U8Vec3, color: [u8; 4]) -> Self;
     fn pos(&self) -> U8Vec3;
 }
 
@@ -24,8 +23,8 @@ impl<T: VoxelType> Chunk<T> {
         }
     }
 
-    pub fn range(&self) -> Range<IVec3> {
-        self.origin..(self.origin + 256)
+    pub fn range(&self) -> Range<[i32; 3]> {
+        self.origin.to_array()..(self.origin + 256).to_array()
     }
 
     #[profiling::function]
@@ -40,8 +39,8 @@ impl<T: VoxelType> Chunk<T> {
 }
 
 impl<T: VoxelType> VoxelStore for Chunk<T> {
-    fn add_voxel(&mut self, position: IVec3, color: Rgba<u8>, _is_emissive: bool) {
-        let pos_in_chunk = position - self.origin;
+    fn add_voxel(&mut self, position: [i32; 3], color: [u8; 4], _is_emissive: bool) {
+        let pos_in_chunk = IVec3::from_array(position) - self.origin;
 
         if let Ok(local) = U8Vec3::try_from(pos_in_chunk) {
             self.voxels.push(T::from_pos_color(local, color));
@@ -57,13 +56,13 @@ impl<T: VoxelType> VoxelStore for Chunk<T> {
 fn group_triangles(scene: &Scene, size: u32) -> HashMap<IVec3, Vec<usize>> {
     let mut chunks = HashMap::<IVec3, Vec<usize>>::new();
 
-    let largest_dim = scene.bounds.size().max_element();
+    let largest_dim = Vec3::from_array(scene.bounds.size()).max_element();
     let scale = size as f32 / largest_dim;
 
     for (idx, tri) in scene.triangles.iter().enumerate() {
         let [a, b, c] = tri
             .vertices
-            .map(|vertex| vertex.pos - scene.bounds.min)
+            .map(|vertex| Vec3::from_array(vertex.pos) - Vec3::from_array(scene.bounds.min))
             .map(|vertex| vertex * scale);
 
         let min = a.min(b).min(c);
