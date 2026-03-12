@@ -1,28 +1,24 @@
 //! Core voxelization algorithms and storage traits.
 use crate::geometry::Triangle;
 use crate::scene::{Scene, WrapMode};
-use clap::ValueEnum;
 use glam::{IVec3, Vec2, Vec3, Vec4};
 use image::RgbaImage;
 use std::fmt;
 use std::ops::Range;
 
 /// Determines the topological style of the generated voxels.
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum VoxelizationMode {
     /// Voxelizes the whole triangle
-    #[value(name = "triangles")]
     Triangles,
     /// Voxelizes the whole triangle, with fat voxelization, meaning
     /// that voxels are guaranteed to share faces (this can prevent
     /// unwanted leakage in some use cases)
-    #[value(name = "fat-triangles")]
     FatTriangles,
     /// Voxelizes only the wireframe of a triangle
-    #[value(name = "wireframe")]
     Wireframe,
     /// Voxelizes only the three vertices of a triangle
-    #[value(name = "points")]
     Points,
 }
 

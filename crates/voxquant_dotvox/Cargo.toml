@@ -13,15 +13,16 @@ repository.workspace = true
 [dependencies]
 dot_vox = "5.2"
 voxquant_core.workspace = true
-clap.workspace = true
 glam.workspace = true
 profiling.workspace = true
 rayon.workspace = true
+clap = { workspace = true, optional = true, features = ["derive"] }
 quantette = { workspace = true, optional = true }
 
 [features]
 default = ["dynamic_palette"]
 dynamic_palette = ["dep:quantette"]
+clap = ["dep:clap"]
 
 [lints]
 workspace = true

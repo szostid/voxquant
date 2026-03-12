@@ -11,12 +11,11 @@ readme.workspace = true
 repository.workspace = true
 
 [dependencies]
+anyhow = "1.0"
 clap = { workspace = true, features = ["derive"] }
-anyhow.workspace = true
-
-voxquant_core.workspace = true
-voxquant_gltf.workspace = true
-voxquant_dotvox.workspace = true
+voxquant_core = { workspace = true, features = ["clap"] }
+voxquant_gltf = { workspace = true, features = ["clap"] }
+voxquant_dotvox = { workspace = true, features = ["clap"] }
 
 [lints]
 workspace = true

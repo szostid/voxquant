@@ -1,5 +1,4 @@
 //! `MagicaVoxel` support for [`voxquant_core`] through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
-use clap::{Args, ValueEnum};
 use glam::{Mat4, Vec3, Vec4};
 use std::fmt;
 use std::io;
@@ -12,17 +11,16 @@ mod voxelization;
 
 /// Determines the algorithm that assigns color indices to
 /// generated voxel colors.
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum ColorMode {
     /// The palette will be static, it will use the default palette defined
     /// by this crate (NOT the default magicavoxel palette!)
-    #[value(name = "static")]
     Static,
     /// The palette will be determined using the colors present within the
     /// generated model. A quantization algorithm will assign colors to
     /// make the output file colors as accurate as possible
     #[cfg(feature = "dynamic_palette")]
-    #[value(name = "dynamic")]
     Dynamic,
 }
 
@@ -78,22 +76,23 @@ fn voxelize_and_write(
 }
 
 /// Config for the [`DotVox`] voxelizer.
-#[derive(Debug, Args)]
-#[command(next_help_heading = "`.vox` format options")]
+#[derive(Debug)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
+#[cfg_attr(feature = "clap", command(next_help_heading = "`.vox` format options"))]
 pub struct DotVoxConfig {
     /// The palette generation mode. Dynamic palette looks
     /// much better, but the static palette is much faster.
     ///
     /// Dynamic palette is only enabled if the feature `dynamic_palette`
     /// is enabled (the feature is enabled by default)
-    #[cfg_attr(feature = "dynamic_palette", arg(long, default_value_t = ColorMode::Dynamic))]
-    #[cfg_attr(not(feature = "dynamic_palette"), arg(long, default_value_t = ColorMode::Static))]
+    #[cfg_attr(all(feature = "clap", feature = "dynamic_palette"), arg(long, default_value_t = ColorMode::Dynamic))]
+    #[cfg_attr(all(feature = "clap", not(feature = "dynamic_palette")), arg(long, default_value_t = ColorMode::Static))]
     pub color: ColorMode,
 
     /// With this option, if two triangles share a voxel,
     /// both voxels will be present in the output file
     /// (magicavoxel will likely present the last one)
-    #[arg(long, default_value_t = false)]
+    #[cfg_attr(feature = "clap", arg(long, default_value_t = false))]
     pub no_optimization: bool,
 }
 

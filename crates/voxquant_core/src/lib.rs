@@ -18,7 +18,6 @@
 
 use crate::scene::Scene;
 use crate::voxelizer::VoxelizationMode;
-use clap::Args;
 use glam::Mat4;
 use std::error::Error;
 use std::path::Path;
@@ -31,17 +30,18 @@ pub mod scene;
 pub mod voxelizer;
 
 /// Configuration required by the voxelizer.
-#[derive(Args, Debug)]
-#[command(next_help_heading = "Voxelization options")]
+#[derive(Debug)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
+#[cfg_attr(feature = "clap", command(next_help_heading = "Voxelization options"))]
 pub struct VoxelizationConfig {
     /// The resolution of the output model
-    #[arg(short, long, default_value_t = 1024)]
+    #[cfg_attr(feature = "clap", arg(short, long, default_value_t = 1024))]
     pub res: u32,
 
     /// The mode of voxelization. Defaults to triangles,
     /// but you can voxelize the wireframe or vertices
     /// instead.
-    #[arg(long, default_value_t = VoxelizationMode::Triangles)]
+    #[cfg_attr(feature = "clap", arg(long, default_value_t = VoxelizationMode::Triangles))]
     pub mode: VoxelizationMode,
 }
 

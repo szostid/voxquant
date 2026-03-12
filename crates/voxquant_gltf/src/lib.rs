@@ -1,5 +1,4 @@
 //! `glTF 2.0` input support for [`voxquant_core`] through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
-use clap::Args;
 use glam::{Mat4, Vec3, Vec4};
 use image::RgbaImage;
 use std::path::PathBuf;
@@ -478,11 +477,12 @@ fn load_gltf(reader: impl SceneReader, root_transform: Mat4) -> Result<Scene> {
 }
 
 /// Config for the [`Gltf`] voxelizer.
-#[derive(Debug, Args)]
-#[command(next_help_heading = "`.gltf` format options")]
+#[derive(Debug)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
+#[cfg_attr(feature = "clap", command(next_help_heading = "glTF format options"))]
 pub struct GltfConfig {
     /// The provided scale will be applied onto the model during importing
-    #[arg(long, default_value_t = 1.0)]
+    #[cfg_attr(feature = "clap", arg(long, default_value_t = 1.0))]
     pub base_scale: f32,
 }
 
