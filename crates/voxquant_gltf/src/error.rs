@@ -1,5 +1,6 @@
 /// Error during parsing and scene loading of a `glTF` file
 #[derive(thiserror::Error, Debug)]
+#[allow(rustdoc::private_intra_doc_links)]
 pub enum Error {
     /// Returned anytime the `glTF` parsing fails. This is returned whenever
     /// a method from [`gltf`] returns a [`gltf::Error`]

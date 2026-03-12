@@ -14,13 +14,13 @@ readme = "README.md"
 repository = "https://github.com/szostid/voxquant"
 
 [workspace.dependencies]
-voxquant_core = { path = "crates/voxquant_core", version = "0.4" }
-voxquant_gltf = { path = "crates/voxquant_gltf", version = "0.4" }
-voxquant_dotvox = { path = "crates/voxquant_dotvox", version = "0.4" }
+voxquant_core = { path = "crates/voxquant_core", version = "0.5" }
+voxquant_gltf = { path = "crates/voxquant_gltf", version = "0.5" }
+voxquant_dotvox = { path = "crates/voxquant_dotvox", version = "0.5" }
 
 image = { version = "0.25", default-features = false }
 clap = "4.5"
-glam = "0.30"
+glam = "0.32"
 quantette = "0.5"
 bytemuck = "1.24"
 thiserror = "2.0"
