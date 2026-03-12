@@ -1,5 +1,4 @@
 //! `glTF 2.0` input support for [`voxquant_core`] through the [`gltf`](https://docs.rs/gltf/latest/gltf/) crate
-use anyhow::{Context as _, Result};
 use clap::Args;
 use glam::{Mat4, Vec3, Vec4};
 use image::RgbaImage;
@@ -9,6 +8,12 @@ use voxquant_core::geometry::{BoundingBox, Triangle, Vertex};
 use voxquant_core::io::SceneReader;
 use voxquant_core::scene::{Material, MaterialTexturing, Scene, WrapMode};
 use voxquant_core::{Format, InputFormat};
+
+mod error;
+pub use error::Error;
+
+/// Result type for convenience.
+pub type Result<T> = std::result::Result<T, Error>;
 
 struct GltfTexturingExtras {
     tex_coord: u32,
@@ -71,7 +76,7 @@ fn convert_image(data: gltf::image::Data) -> Result<Arc<RgbaImage>> {
         let pixels = convert_data(data.pixels);
 
         ImageBuffer::from_vec(data.width, data.height, pixels)
-            .context("image has invalid dimensions")
+            .ok_or(Error::InvalidImageDimensions)
             .map(|img| Arc::new(img.convert()))
     }
 
@@ -88,7 +93,7 @@ fn convert_image(data: gltf::image::Data) -> Result<Arc<RgbaImage>> {
         Format::R8G8 => convert_image::<LumaA<u8>>(data),
         Format::R8G8B8 => convert_image::<Rgb<u8>>(data),
         Format::R8G8B8A8 => RgbaImage::from_vec(data.width, data.height, data.pixels)
-            .context("image has invalid dimensions")
+            .ok_or(Error::InvalidImageDimensions)
             .map(Arc::new),
     }
 }
@@ -97,9 +102,7 @@ fn convert_image(data: gltf::image::Data) -> Result<Arc<RgbaImage>> {
 fn parse_image(image_data: &[Arc<RgbaImage>], texture: gltf::Texture) -> Result<Arc<RgbaImage>> {
     let image_index = texture.source().index();
 
-    let image = image_data
-        .get(image_index)
-        .context("failed to fetch image data (index is out of bounds)")?;
+    let image = image_data.get(image_index).ok_or(Error::OutOfBounds)?;
 
     Ok(Arc::clone(image))
 }
@@ -141,9 +144,7 @@ fn get_material_texture_data(
     with_material_texture(mat, |texture_info| {
         let texture_index = texture_info.texture().source().index();
 
-        let texture = image_data
-            .get(texture_index)
-            .context("failed to fetch image data (index is out of bounds)")?;
+        let texture = image_data.get(texture_index).ok_or(Error::OutOfBounds)?;
 
         Ok((
             MaterialTexturing {
@@ -195,7 +196,6 @@ fn parse_material(
         mat.pbr_metallic_roughness()
             .base_color_factor()
             .map(|r| (r * 255.0) as u8)
-            .into()
     };
 
     let (texturing, texturing_extras) = match get_material_texture_data(mat, image_data)? {
@@ -291,7 +291,7 @@ fn parse_mesh_instance(
 
         let positions = reader
             .read_positions()
-            .context("mesh has no positions")?
+            .ok_or(Error::PrimitiveWithNoPositions)?
             .map(|pos| {
                 instance
                     .transform
@@ -388,14 +388,13 @@ fn import_gltf(
     let mut gltf = {
         profiling::scope!("gltf::load_document");
 
-        gltf::Gltf::from_reader(reader).context("failed to parse gltf")?
+        gltf::Gltf::from_reader(reader)?
     };
 
     let buffers = {
         profiling::scope!("gltf::import_buffers");
 
-        gltf::import_buffers(&gltf.document, base, gltf.blob.take())
-            .context("failed to read buffers")?
+        gltf::import_buffers(&gltf.document, base, gltf.blob.take())?
     };
 
     let images = gltf
@@ -405,8 +404,7 @@ fn import_gltf(
         .map(|image| {
             profiling::scope!("gltf::load_image");
 
-            let texture_data = gltf::image::Data::from_source(image.source(), base, &buffers)
-                .context("failed to read texture")?;
+            let texture_data = gltf::image::Data::from_source(image.source(), base, &buffers)?;
 
             convert_image(texture_data)
         })
@@ -417,14 +415,12 @@ fn import_gltf(
 
 #[profiling::function]
 fn load_gltf(reader: impl SceneReader, root_transform: Mat4) -> Result<Scene> {
-    let (document, buffers, images) =
-        import_gltf(reader).context("failed to load the gltf file")?;
+    let (document, buffers, images) = import_gltf(reader)?;
 
     let (mut materials, mut material_extras) = document
         .materials()
         .map(|material| parse_material(&material, &images))
-        .collect::<Result<(Vec<_>, Vec<_>), _>>()
-        .context("failed to parse materials")?;
+        .collect::<Result<(Vec<_>, Vec<_>)>>()?;
 
     // default fallback material
     materials.push(Material {
@@ -509,6 +505,7 @@ impl Format for Gltf {
 
 impl InputFormat for Gltf {
     type Config = GltfConfig;
+    type Error = Error;
 
     fn read<R: SceneReader>(
         transform_matrix: Mat4,

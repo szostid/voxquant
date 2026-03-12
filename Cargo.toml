@@ -24,6 +24,7 @@ glam = "0.30"
 quantette = "0.5"
 bytemuck = "1.24"
 anyhow = "1.0"
+thiserror = "2.0"
 rayon = "1.11"
 profiling = "1.0"
 

@@ -33,7 +33,7 @@ impl<R: SceneReader + ?Sized> SceneReader for &mut R {
 
 impl<T> SceneReader for Cursor<T>
 where
-    Cursor<T>: Read + Seek,
+    Self: Read + Seek,
 {
     fn base_path(&self) -> Option<&Path> {
         None
@@ -60,7 +60,7 @@ impl<W: SceneWriter + ?Sized> SceneWriter for &mut W {
 
 impl<T> SceneWriter for Cursor<T>
 where
-    Cursor<T>: Write + Seek,
+    Self: Write + Seek,
 {
     fn base_path(&self) -> Option<&Path> {
         None
@@ -78,6 +78,9 @@ pub struct LocalFile {
 
 impl LocalFile {
     /// Opens a file with custom options and infers its parent directory.
+    ///
+    /// # Errors
+    /// Returns an error if [`OpenOptions::open`] returns an error
     pub fn new<P: AsRef<Path>>(path: P, options: &OpenOptions) -> Result<Self> {
         let file = options.open(path.as_ref())?;
 
@@ -93,6 +96,9 @@ impl LocalFile {
     /// Opens a file in read-only mode, and infers its base directory
     ///
     /// Equivalent to [`std::fs::File::open`]
+    ///
+    /// # Errors
+    /// Returns an error if [`OpenOptions::open`] returns an error
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::new(path, OpenOptions::new().read(true))
     }
@@ -102,6 +108,9 @@ impl LocalFile {
     /// Creates the file if it does not exist, and truncates it if it does.
     ///
     /// Equivalent to [`std::fs::File::create`]
+    ///
+    /// # Errors
+    /// Returns an error if [`OpenOptions::open`] returns an error
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::new(
             path,
@@ -113,6 +122,9 @@ impl LocalFile {
     /// Fails if the file already exists.
     ///
     /// Equivalent to [`std::fs::File::create_new`]
+    ///
+    /// # Errors
+    /// Returns an error if [`OpenOptions::open`] returns an error
     pub fn create_new<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::new(
             path,

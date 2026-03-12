@@ -113,7 +113,7 @@ impl BoundingBox {
 
     /// Extends the bounding box so that it contains the point `p`
     #[inline]
-    pub fn extend(&mut self, p: [f32; 3]) {
+    pub const fn extend(&mut self, p: [f32; 3]) {
         self.min[0] = self.min[0].min(p[0]);
         self.min[1] = self.min[1].min(p[1]);
         self.min[2] = self.min[2].min(p[2]);

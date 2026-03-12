@@ -16,12 +16,12 @@
     clippy::cast_precision_loss
 )]
 
-use anyhow::Result;
+use crate::scene::Scene;
+use crate::voxelizer::VoxelizationMode;
 use clap::Args;
 use glam::Mat4;
-use scene::Scene;
+use std::error::Error;
 use std::path::Path;
-use voxelizer::VoxelizationMode;
 
 pub use image;
 
@@ -59,6 +59,9 @@ pub trait Format {
 pub trait InputFormat: Format {
     /// The specific format config required by this format
     type Config;
+    /// The error type returned by this format when it fails
+    /// to read/load.
+    type Error: Error + From<std::io::Error>;
 
     /// Loads the scene from the provided reader using this format.
     ///
@@ -72,7 +75,7 @@ pub trait InputFormat: Format {
         transform_matrix: Mat4,
         reader: R,
         format_config: Self::Config,
-    ) -> Result<Scene>;
+    ) -> Result<Scene, Self::Error>;
 
     /// Loads the scene from the file at `path` using this format.
     ///
@@ -82,7 +85,11 @@ pub trait InputFormat: Format {
     /// This depends on the exact implementation of the format. Usually
     /// missing or malformed files or unsupported features will cause
     /// erros.
-    fn load(transform_matrix: Mat4, path: &Path, format_config: Self::Config) -> Result<Scene> {
+    fn load(
+        transform_matrix: Mat4,
+        path: &Path,
+        format_config: Self::Config,
+    ) -> Result<Scene, Self::Error> {
         let reader = io::LocalFile::open(path)?;
 
         Self::read(transform_matrix, reader, format_config)
@@ -93,6 +100,9 @@ pub trait InputFormat: Format {
 pub trait OutputFormat: Format {
     /// The specific format config required by this format
     type Config;
+    /// The error type returned by this format when it fails
+    /// to write/save.
+    type Error: Error + From<std::io::Error>;
 
     /// Voxelizes and writes the scene to `writer` using this format.
     ///
@@ -105,7 +115,7 @@ pub trait OutputFormat: Format {
         writer: W,
         format_config: Self::Config,
         voxelization_config: &VoxelizationConfig,
-    ) -> Result<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Voxelizes and saves the scene at `path` using this format.
     ///
@@ -118,7 +128,7 @@ pub trait OutputFormat: Format {
         path: &Path,
         format_config: Self::Config,
         voxelization_config: &VoxelizationConfig,
-    ) -> Result<()> {
+    ) -> Result<(), Self::Error> {
         let writer = io::LocalFile::create(path)?;
 
         Self::voxelize_and_write(scene, writer, format_config, voxelization_config)

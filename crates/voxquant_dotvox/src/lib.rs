@@ -1,8 +1,8 @@
 //! `MagicaVoxel` support for [`voxquant_core`] through the [`dot_vox`](https://docs.rs/dot_vox/latest/dot_vox/) crate
-use anyhow::Result;
 use clap::{Args, ValueEnum};
 use glam::{Mat4, Vec3, Vec4};
 use std::fmt;
+use std::io;
 use voxquant_core::io::SceneWriter;
 use voxquant_core::scene::Scene;
 use voxquant_core::{Format, OutputFormat, VoxelizationConfig};
@@ -42,7 +42,7 @@ fn voxelize_and_write(
     format_config: &DotVoxConfig,
     voxelization_config: &VoxelizationConfig,
     output: impl SceneWriter,
-) -> Result<()> {
+) -> io::Result<()> {
     let largest_dim = Vec3::from_array(scene.bounds.size()).max_element();
     let scale = voxelization_config.res as f32 / largest_dim;
 
@@ -115,13 +115,14 @@ impl Format for DotVox {
 
 impl OutputFormat for DotVox {
     type Config = DotVoxConfig;
+    type Error = io::Error;
 
     fn voxelize_and_write<W: SceneWriter>(
         scene: Scene,
         output: W,
         format_config: Self::Config,
         voxelization_config: &VoxelizationConfig,
-    ) -> Result<()> {
+    ) -> io::Result<()> {
         voxelize_and_write(scene, &format_config, voxelization_config, output)
     }
 }

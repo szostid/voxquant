@@ -16,7 +16,6 @@ voxquant_core.workspace = true
 clap.workspace = true
 glam.workspace = true
 profiling.workspace = true
-anyhow.workspace = true
 rayon.workspace = true
 quantette = { workspace = true, optional = true }
 

@@ -1,7 +1,7 @@
 use crate::voxelization::{Chunk, VoxelType};
-use anyhow::Result;
 use dot_vox::{Color, Model, Voxel};
 use glam::{IVec3, U8Vec3};
+use std::io;
 use std::num::NonZeroU8;
 use voxquant_core::io::SceneWriter;
 
@@ -186,7 +186,7 @@ pub fn write_vox_dynamic(
     chunks: Vec<Chunk<VoxelWithColor>>,
     mut output: impl SceneWriter,
     shift: IVec3,
-) -> Result<()> {
+) -> io::Result<()> {
     use dot_vox::{DotVoxData, Frame, SceneNode, ShapeModel};
 
     let (models, origins, palette) = quantize_colors(chunks);
@@ -266,7 +266,7 @@ pub fn write_vox_static(
     chunks: Vec<Chunk<dot_vox::Voxel>>,
     mut output: impl SceneWriter,
     shift: IVec3,
-) -> Result<()> {
+) -> io::Result<()> {
     use dot_vox::{DotVoxData, Frame, SceneNode, ShapeModel, Size};
 
     // the palette starts at index 1 and ends later because magicavoxel only allows for 255
